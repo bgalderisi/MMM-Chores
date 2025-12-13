@@ -751,17 +751,35 @@ module.exports = NodeHelper.create({
         id: Date.now(),
         ...req.body,
         created: getLocalISO(now),
-        order: tasks.filter(t => !t.deleted).length,
         done: false,
         assignedTo: req.body.assignedTo ? parseInt(req.body.assignedTo, 10) : null,
         recurring: req.body.recurring || "none",
+        // 'order' will be fixed by broadcastTasks immediately after
       };
+
       Log.log("POST /api/tasks", newTask);
-      tasks.push(newTask);
+
+      // --- FIX START: Group by name ---
+      // Find the last occurrence of a task with this name to group them
+      let insertIndex = -1;
+      for (let i = tasks.length - 1; i >= 0; i--) {
+        if (tasks[i].name === newTask.name && !tasks[i].deleted) {
+          insertIndex = i;
+          break;
+        }
+      }
+
+      if (insertIndex !== -1) {
+        tasks.splice(insertIndex + 1, 0, newTask);
+      } else {
+        tasks.push(newTask);
+      }
+      // --- FIX END ---
+
       sendPushover(self, settings, `New task: ${newTask.name}`);
       const ok = broadcastTasks(self);
       res.status(ok ? 201 : 500).json(ok ? newTask : { error: "Failed to save data" });
-    });
+    });;
 
     // Reorder tasks
     app.put("/api/tasks/reorder", requireWrite, (req, res) => {
@@ -830,11 +848,20 @@ module.exports = NodeHelper.create({
             date: nextDate,
             assignedTo: task.assignedTo || null,
             recurring: task.recurring,
-            order: tasks.filter(t => !t.deleted).length,
+            // We set a temporary order; broadcastTasks will re-index it correctly based on array position
+            order: task.order + 1, 
             done: false,
             created: getLocalISO(new Date()),
           };
-          tasks.push(newTask);
+
+          // --- FIX START: Insert next to original ---
+          const originalIndex = tasks.findIndex(t => t.id === id);
+          if (originalIndex !== -1) {
+            tasks.splice(originalIndex + 1, 0, newTask);
+          } else {
+            tasks.push(newTask);
+          }
+          // --- FIX END ---
         }
       }
 
