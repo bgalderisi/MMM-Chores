@@ -779,7 +779,7 @@ module.exports = NodeHelper.create({
       sendPushover(self, settings, `New task: ${newTask.name}`);
       const ok = broadcastTasks(self);
       res.status(ok ? 201 : 500).json(ok ? newTask : { error: "Failed to save data" });
-    });;
+    });
 
     // Reorder tasks
     app.put("/api/tasks/reorder", requireWrite, (req, res) => {
