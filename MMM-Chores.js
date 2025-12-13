@@ -16,7 +16,7 @@ const BOARD_TITLES = {
 Module.register("MMM-Chores2", {
   defaults: {
     updateInterval: 60 * 1000,
-    adminPort: 5503,
+    adminPort: 5003,
     settings: "locked", // set to "unlocked" to enable settings popup or to a 6-digit PIN (e.g. "000000") to require a PIN
     showDays: 1,
     showPast: false,
