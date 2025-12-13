@@ -13,10 +13,10 @@ const BOARD_TITLES = {
   slacker9000: "Slacker Detector 9000"
 };
 
-Module.register("MMM-Chores", {
+Module.register("MMM-Chores2", {
   defaults: {
     updateInterval: 60 * 1000,
-    adminPort: 5003,
+    adminPort: 5503,
     settings: "locked", // set to "unlocked" to enable settings popup or to a 6-digit PIN (e.g. "000000") to require a PIN
     showDays: 1,
     showPast: false,
