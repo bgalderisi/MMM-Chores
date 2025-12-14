@@ -1061,6 +1061,38 @@ module.exports = NodeHelper.create({
       res.json({ success: ok });
     });
 
+
+    app.delete("/api/tasks/:id/hard", requireWrite, (req, res) => {
+      const id = parseInt(req.params.id, 10);
+      const mode = req.query.mode; // Expecting 'single' or 'series'
+
+      const targetTask = tasks.find(t => t.id === id);
+      if (!targetTask) return res.status(404).json({ error: "Task not found" });
+
+      const initialLength = tasks.length;
+
+      if (mode === 'series') {
+        // Determine the family ID (root)
+        const root = targetTask.rootId || targetTask.id;
+        
+        // Remove ALL tasks that share this root ID (including the root itself)
+        tasks = tasks.filter(t => {
+          const tRoot = t.rootId || t.id;
+          return tRoot !== root;
+        });
+        
+        Log.log(`Hard deleted series (Root: ${root}). Removed ${initialLength - tasks.length} tasks.`);
+      } else {
+        // Remove ONLY this specific task ID
+        tasks = tasks.filter(t => t.id !== id);
+        Log.log(`Hard deleted single task: ${id}`);
+      }
+
+      // Save and update all clients
+      const ok = broadcastTasks(self);
+      res.json({ success: ok });
+    });
+
     app.get("/api/analyticsBoards", (req, res) => res.json(analyticsBoards));
     app.post("/api/analyticsBoards", requireWrite, (req, res) => {
       const newBoards = req.body;
