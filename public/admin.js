@@ -864,17 +864,23 @@ function renderTasks() {
       handle: '.drag-handle',
       animation: 150,
       onEnd: async (evt) => {
+        // 1. Optimistic update (calculate IDs)
         const visible = tasksCache.filter(t => !t.deleted);
         const moved = visible.splice(evt.oldIndex, 1)[0];
         visible.splice(evt.newIndex, 0, moved);
-        let i = 0;
-        tasksCache = tasksCache.map(t => t.deleted ? t : visible[i++]);
-        const ids = tasksCache.filter(t => !t.deleted).map(t => t.id);
+        
+        // 2. Extract IDs for the backend
+        const ids = visible.map(t => t.id);
+        
+        // 3. Send new order to backend
         await authFetch('/api/tasks/reorder', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(ids)
         });
+        
+        // 4. FIX: Reload tasks from server to see the family groupings
+        await fetchTasks();
       }
     });
   }
