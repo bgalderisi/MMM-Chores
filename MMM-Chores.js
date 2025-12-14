@@ -455,6 +455,10 @@ Module.register("MMM-Chores", {
       }
 
       const li = document.createElement("li");
+      li.style.display = "flex";
+      li.style.alignItems = "center";
+      li.style.justifyContent = "space-between"; // Ensures spacing if we use spacers
+
       // 2. Add the overdueClass to the list item
       li.className = `${this.config.textMirrorSize}${task.done ? " task-done" : ""}${overdueClass}`;
 
@@ -493,6 +497,19 @@ Module.register("MMM-Chores", {
         }
         assignedEl.innerHTML = html;
         li.appendChild(assignedEl);
+      }
+
+      if (task.icon) {
+        const iconSpan = document.createElement("span");
+        // Use the class provided (e.g., "fa fa-trash")
+        iconSpan.className = task.icon;
+        
+        // Style to push it to the far right
+        iconSpan.style.marginLeft = "auto"; 
+        // Optional: Add a little left padding so it doesn't touch the name
+        iconSpan.style.paddingLeft = "10px"; 
+        
+        li.appendChild(iconSpan);
       }
 
       ul.appendChild(li);

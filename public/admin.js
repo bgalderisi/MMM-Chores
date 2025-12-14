@@ -856,11 +856,13 @@ function openEditModal(task) {
   const dateInput = document.getElementById('editTaskDate');
   const personSelect = document.getElementById('editTaskPerson');
   const reminderInput = document.getElementById('editTaskReminderTime');
+  const iconInput = document.getElementById('editTaskIcon');
   
   if (nameInput) nameInput.value = task.name;
   if (dateInput) dateInput.value = task.date || '';
   if (personSelect) personSelect.value = task.assignedTo || '';
   if (reminderInput) reminderInput.value = task.reminderTime || '';
+  if (iconInput) iconInput.value = task.icon || '';
 
   // 2. Inject Hard Delete Buttons (New Logic)
   const modalFooter = document.querySelector('#editTaskModal .modal-footer');
@@ -1088,6 +1090,7 @@ document.getElementById("taskForm").addEventListener("submit", async e => {
   const recurring = document.getElementById("taskRecurring").value;
   const assigned = document.getElementById("taskPerson").value;
   const reminderTime = document.getElementById("taskReminderTime").value;
+  const icon = document.getElementById("taskIcon").value.trim();
 
   if (!name) return;
   if (!date) date = new Date().toISOString().split("T")[0];
@@ -1112,6 +1115,7 @@ document.getElementById("taskForm").addEventListener("submit", async e => {
       recurring,
       assignedTo: assigned ? parseInt(assigned) : null,
       reminderTime: reminderTime || null,
+      icon: icon || null,
       created: iso,
       createdShort: stamp("C")
     })
@@ -1126,11 +1130,14 @@ document.getElementById('editTaskForm').addEventListener('submit', async e => {
   const date = document.getElementById('editTaskDate').value;
   const assigned = document.getElementById('editTaskPerson').value;
   const reminderTime = document.getElementById('editTaskReminderTime').value;
+  const icon = document.getElementById('editTaskIcon').value.trim();
+
   await updateTask(editTaskId, {
     name,
     date,
     assignedTo: assigned ? parseInt(assigned) : null,
-    reminderTime: reminderTime || null
+    reminderTime: reminderTime || null,
+    icon: icon || null
   });
   if (editTaskModal) editTaskModal.hide();
   editTaskId = null;

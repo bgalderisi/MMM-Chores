@@ -122,6 +122,10 @@
                       <option value="yearly">Yearly</option>
                     </select>
                   </div>
+                  <div class="col-sm-auto">
+                    <label for="taskIcon" class="form-label">Icon Class (optional)</label>
+                    <input type="text" class="form-control" id="taskIcon" placeholder="e.g. fa fa-broom">
+                  </div>
                   <div class="col-sm-auto d-flex gap-2">
                     <button class="btn btn-primary" type="submit" id="btnAddTask">
                       <i class="bi bi-plus-lg me-1"></i>Add
@@ -190,6 +194,10 @@
               <div class="mb-3">
                 <label for="editTaskReminderTime" class="form-label">Reminder Time</label>
                 <input type="time" class="form-control" id="editTaskReminderTime">
+              </div>
+              <div class="mb-3">
+                <label for="editTaskIcon" class="form-label">Icon Class</label>
+                <input type="text" class="form-control" id="editTaskIcon" placeholder="e.g. fa fa-broom">
               </div>
             </div>
             <div class="modal-footer">
