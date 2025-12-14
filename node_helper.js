@@ -747,23 +747,72 @@ module.exports = NodeHelper.create({
     });
     app.post("/api/tasks", requireWrite, (req, res) => {
       const now = new Date();
+      
+      // Helper to normalize strings for comparison (removes casing and extra spaces)
+      const normalize = (str) => (str || "").trim().toLowerCase();
+      
+      const newNameNorm = normalize(req.body.name);
+      const newAssignee = req.body.assignedTo ? parseInt(req.body.assignedTo, 10) : null;
+      
+      let derivedParentId = null;
+      
+      // FIX: ROBUST MATCHING LOGIC
+      // 1. Explicit ID Check: Did the request send a parentId?
+      if (req.body.parentId) {
+        derivedParentId = req.body.parentId;
+      } 
+      else {
+        // Prepare a list of candidate tasks (active or deleted) to search against
+        // We reverse to find the most recent tasks first
+        const candidates = tasks.slice().reverse();
+
+        // 2. Contextual Match: Same Name + Same Person
+        let match = candidates.find(t => 
+          normalize(t.name) === newNameNorm && 
+          t.assignedTo === newAssignee
+        );
+
+        // 3. Fallback: Same Name only (if no assignee match found)
+        if (!match) {
+          match = candidates.find(t => normalize(t.name) === newNameNorm);
+        }
+
+        if (match) {
+          // If the match is a child, take its parent. If it's a root, take its ID.
+          derivedParentId = match.parentId || match.id;
+        }
+      }
+
       const newTask = {
         id: Date.now(),
         ...req.body,
         created: getLocalISO(now),
         order: tasks.filter(t => !t.deleted).length,
         done: false,
-        assignedTo: req.body.assignedTo ? parseInt(req.body.assignedTo, 10) : null,
+        assignedTo: newAssignee,
         recurring: req.body.recurring || "none",
+        parentId: derivedParentId, // Link to existing family
       };
       Log.log("POST /api/tasks", newTask);
       
-      // FIX: GROUP BY NAME (MANUAL ADD)
+      // FIX: INSERTION ORDERING LOGIC
       let insertIndex = -1;
-      for (let i = tasks.length - 1; i >= 0; i--) {
-        if (tasks[i].name === newTask.name && !tasks[i].deleted) {
-          insertIndex = i;
-          break;
+
+      if (newTask.parentId) {
+        // Grouping: Insert after the last member of this specific family
+        for (let i = tasks.length - 1; i >= 0; i--) {
+          if (tasks[i].id === newTask.parentId || tasks[i].parentId === newTask.parentId) {
+            insertIndex = i;
+            break;
+          }
+        }
+      } else {
+        // Fallback Grouping: If no parent found, try to group by name one last time
+        for (let i = tasks.length - 1; i >= 0; i--) {
+          if (normalize(tasks[i].name) === newNameNorm && !tasks[i].deleted) {
+            insertIndex = i;
+            break;
+          }
         }
       }
 
@@ -836,7 +885,7 @@ module.exports = NodeHelper.create({
       });
       Log.log("PUT /api/tasks/" + id, req.body);
 
-      // FIX: RECURRING TASK LOGIC WITH PARENT ID
+      // FIX: RECURRING TASK LOGIC WITH PARENT ID AND ORDERING
       if (!prevDone && task.done && task.recurring && task.recurring !== "none") {
         const nextDate = getNextDate(task.date, task.recurring);
         if (nextDate) {
