@@ -399,11 +399,8 @@ Module.register("MMM-Chores", {
     });
   },
 
-  getDom() {
+getDom() {
     const wrapper = document.createElement("div");
-
-    // Remove the large header showing the global level. Levels are displayed
-    // next to each person's name instead.
 
     if (this.titleChangeMessage) {
       const note = document.createElement("div");
@@ -412,7 +409,6 @@ Module.register("MMM-Chores", {
       wrapper.appendChild(note);
     }
 
-    // Filter out all deleted tasks completely from the mirror
     const visible = this.tasks
       .filter(t => !t.deleted && this.shouldShowTask(t))
       .sort((a, b) => {
@@ -437,35 +433,29 @@ Module.register("MMM-Chores", {
     ul.className = "normal";
 
     visible.forEach(task => {
-      const li = document.createElement("li");
-      li.className = `${this.config.textMirrorSize}${task.done ? " task-done" : ""}`;
+      // 1. Calculate Overdue Status (New Logic)
+      let overdueClass = "";
+      
+      if (!task.done && task.reminderTime) {
+        // Construct the specific deadline timestamp
+        const deadline = moment(`${task.date}T${task.reminderTime}`);
+        const now = moment();
 
-      var row = document.createElement("div");
-      row.className = "chore-row"; // Base class
-
-      // 2. LOGIC: Check for Overdue Reminder
-      if (!chore.done && chore.reminderTime) {
-          // We only care if the task date is Today or in the Past
-          var todayStr = moment().format("YYYY-MM-DD");
+        // Check if we have passed the deadline
+        if (now.isAfter(deadline)) {
+          const diffHours = now.diff(deadline, 'hours', true); // get difference in fractional hours
           
-          if (chore.date <= todayStr) {
-              var now = moment();
-              // Parse the reminder time (assuming HH:mm format)
-              var reminder = moment(chore.reminderTime, "HH:mm");
-              
-              // If we are past the reminder time
-              if (now.isAfter(reminder)) {
-                  var diffHours = now.diff(reminder, 'hours', true); // Floating point hours
-                  
-                  if (diffHours >= 3) {
-                      row.className += " overdue-red";
-                  } else {
-                      row.className += " overdue-yellow";
-                  }
-              }
+          if (diffHours >= 3) {
+            overdueClass = " overdue-red";
+          } else {
+            overdueClass = " overdue-yellow";
           }
+        }
       }
 
+      const li = document.createElement("li");
+      // 2. Add the overdueClass to the list item
+      li.className = `${this.config.textMirrorSize}${task.done ? " task-done" : ""}${overdueClass}`;
 
       const cb = document.createElement("input");
       cb.type = "checkbox";
