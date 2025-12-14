@@ -833,3 +833,824 @@ function createTaskRow(task, canWrite) {
 // ... (Rest of file: openEditModal, getWeekNumber, renderCalendar, CRUD handlers, Charts, etc. same as original) ...
 // The rest of the file logic is identical to your provided file, just assume it's appended here.
 // For brevity, I'm not repeating lines 690 to end unless necessary, but you should keep them.
+
+function openEditModal(task) {
+  editTaskId = task.id;
+  const nameInput = document.getElementById('editTaskName');
+  const dateInput = document.getElementById('editTaskDate');
+  const personSelect = document.getElementById('editTaskPerson');
+  if (nameInput) nameInput.value = task.name;
+  if (dateInput) dateInput.value = task.date || '';
+  if (personSelect) personSelect.value = task.assignedTo || '';
+  if (!editTaskModal) {
+    const modalEl = document.getElementById('editTaskModal');
+    if (modalEl) editTaskModal = new bootstrap.Modal(modalEl);
+  }
+  if (editTaskModal) editTaskModal.show();
+}
+
+function getWeekNumber(d) {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return Math.ceil(((date - yearStart) / 86400000 + 1) / 7);
+}
+
+function renderCalendar() {
+  const container = document.getElementById("taskCalendar");
+  if (!container) return;
+
+  const undone = tasksCache.filter(t => !t.deleted && !t.done);
+  if (undone.length === 0) {
+    container.innerHTML = `<p class="text-center text-muted">${LANGUAGES[currentLang].noTasks}</p>`;
+    return;
+  }
+
+  const tasksByDate = {};
+  undone.forEach(t => {
+    if (!tasksByDate[t.date]) tasksByDate[t.date] = [];
+    tasksByDate[t.date].push(t);
+  });
+
+  const weekdays = localizedWeekdays.length ? localizedWeekdays : ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+  const pad = n => String(n).padStart(2, '0');
+
+  let html = `
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <button class="btn btn-sm btn-outline-secondary" id="calPrev">&lt;</button>
+      <span id="calTitle" class="fw-bold"></span>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-outline-secondary" id="calToggle">${calendarView === 'week' ? LANGUAGES[currentLang].monthLabel : LANGUAGES[currentLang].weekLabel}</button>
+        <button class="btn btn-sm btn-outline-secondary" id="calNext">&gt;</button>
+      </div>
+    </div>`;
+
+  html += '<table class="table table-bordered table-sm">';
+  html += '<thead><tr>' + weekdays.map(d => `<th class="text-center">${d}</th>`).join('') + '</tr></thead><tbody>';
+
+  if (calendarView === 'month') {
+    const year = calendarDate.getFullYear();
+    const month = calendarDate.getMonth();
+    const first = new Date(year, month, 1);
+    const startDay = (first.getDay() + 6) % 7; // Monday as first day
+    const last = new Date(year, month + 1, 0);
+    const totalDays = last.getDate();
+    let day = 1;
+    for (let w = 0; w < 6 && day <= totalDays; w++) {
+      html += '<tr>';
+      for (let d = 0; d < 7; d++) {
+        if ((w === 0 && d < startDay) || day > totalDays) {
+          html += '<td></td>';
+        } else {
+          const dateStr = `${year}-${pad(month + 1)}-${pad(day)}`;
+          const arr = tasksByDate[dateStr] || [];
+          html += `<td class="align-top"><div><strong>${day}</strong></div>`;
+          arr.forEach(t => { html += `<div class="small">${t.name}</div>`; });
+          html += '</td>';
+          day++;
+        }
+      }
+      html += '</tr>';
+    }
+  } else {
+    const start = new Date(calendarDate);
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+    html += '<tr>';
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      const arr = tasksByDate[dateStr] || [];
+      html += `<td class="align-top"><div><strong>${d.getDate()}</strong></div>`;
+      arr.forEach(t => { html += `<div class="small">${t.name}</div>`; });
+      html += '</td>';
+    }
+    html += '</tr>';
+  }
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
+
+  const titleEl = document.getElementById('calTitle');
+  if (calendarView === 'month') {
+    const months = localizedMonths.length ? localizedMonths : ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    titleEl.textContent = `${months[calendarDate.getMonth()]} ${calendarDate.getFullYear()}`;
+  } else {
+    titleEl.textContent = `${LANGUAGES[currentLang].weekLabel} ${getWeekNumber(calendarDate)} ${calendarDate.getFullYear()}`;
+  }
+
+  document.getElementById('calPrev').onclick = () => {
+    if (calendarView === 'month') {
+      calendarDate.setMonth(calendarDate.getMonth() - 1);
+    } else {
+      calendarDate.setDate(calendarDate.getDate() - 7);
+    }
+    renderCalendar();
+  };
+  document.getElementById('calNext').onclick = () => {
+    if (calendarView === 'month') {
+      calendarDate.setMonth(calendarDate.getMonth() + 1);
+    } else {
+      calendarDate.setDate(calendarDate.getDate() + 7);
+    }
+    renderCalendar();
+  };
+  document.getElementById('calToggle').onclick = () => {
+    calendarView = calendarView === 'week' ? 'month' : 'week';
+    renderCalendar();
+  };
+}
+
+// ==========================
+// CRUD Handlers
+// ==========================
+const personRewardsForm = document.getElementById('personRewardsForm');
+if (personRewardsForm) {
+  personRewardsForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    if (!personRewardsTarget) return;
+    const titles = personRewardTitleInputs.map(inp => inp.value);
+    if (titles.every(t => !t.trim())) {
+      delete customLevelTitles[personRewardsTarget.name];
+    } else {
+      customLevelTitles[personRewardsTarget.name] = titles;
+    }
+    try {
+      await authFetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customLevelTitles })
+      });
+      const modal = bootstrap.Modal.getInstance(personRewardsModalEl);
+      if (modal) modal.hide();
+      await fetchPeople();
+    } catch (err) {
+      console.error('Failed saving custom rewards', err);
+    }
+  });
+}
+const personRewardsRemoveBtn = document.getElementById('personRewardsRemoveBtn');
+if (personRewardsRemoveBtn) {
+  personRewardsRemoveBtn.addEventListener('click', async () => {
+    if (!personRewardsTarget) return;
+    delete customLevelTitles[personRewardsTarget.name];
+    try {
+      await authFetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customLevelTitles })
+      });
+      const modal = bootstrap.Modal.getInstance(personRewardsModalEl);
+      if (modal) modal.hide();
+      await fetchPeople();
+    } catch (err) {
+      console.error('Failed removing custom rewards', err);
+    }
+  });
+}
+
+document.getElementById("personForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const name = document.getElementById("personName").value.trim();
+  if (!name) return;
+  await authFetch("/api/people", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name })
+  });
+  e.target.reset();
+  await fetchPeople();
+  await fetchTasks();
+});
+
+document.getElementById("taskForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const name = document.getElementById("taskName").value.trim();
+  let date = document.getElementById("taskDate").value;
+  const recurring = document.getElementById("taskRecurring").value;
+  const assigned = document.getElementById("taskPerson").value;
+  if (!name) return;
+  if (!date) date = new Date().toISOString().split("T")[0];
+
+  const now = new Date();
+  const iso = now.toISOString();
+  const pad = n => n.toString().padStart(2, "0");
+  const stamp = (prefix) => (
+    prefix +
+    pad(now.getMonth() + 1) +
+    pad(now.getDate()) +
+    pad(now.getHours()) +
+    pad(now.getMinutes())
+  );
+
+  await authFetch("/api/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      date,
+      recurring,
+      assignedTo: assigned ? parseInt(assigned) : null,
+      created: iso,
+      createdShort: stamp("C")
+    })
+  });
+  e.target.reset();
+  await fetchTasks();
+});
+
+document.getElementById('editTaskForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const name = document.getElementById('editTaskName').value.trim();
+  const date = document.getElementById('editTaskDate').value;
+  const assigned = document.getElementById('editTaskPerson').value;
+  await updateTask(editTaskId, {
+    name,
+    date,
+    assignedTo: assigned ? parseInt(assigned) : null
+  });
+  if (editTaskModal) editTaskModal.hide();
+  editTaskId = null;
+});
+
+async function updateTask(id, changes) {
+  Object.keys(changes).forEach(key => {
+    if (changes[key] === null) changes[key] = undefined;
+  });
+  await authFetch(`/api/tasks/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(changes)
+  });
+  await fetchTasks();
+}
+
+async function deletePerson(id) {
+  await authFetch(`/api/people/${id}`, { method: "DELETE" });
+  await fetchPeople();
+  await fetchTasks();
+}
+
+async function deleteTask(id) {
+  await authFetch(`/api/tasks/${id}`, { method: "DELETE" });
+  await fetchTasks();
+}
+
+
+// ==========================
+// Analytics Board Persistence
+// ==========================
+async function fetchSavedBoards() {
+  try {
+    const res = await authFetch('/api/analyticsBoards');
+    if (!res.ok) throw new Error('Failed fetching saved boards');
+    return await res.json();
+  } catch (e) {
+    console.warn('No saved analytics boards or error:', e);
+    return [];
+  }
+}
+
+async function saveBoards(typesArray) {
+  try {
+    await authFetch('/api/analyticsBoards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(typesArray)
+    });
+  } catch (e) {
+    console.error('Failed saving analytics boards:', e);
+  }
+}
+
+function getCurrentBoardTypes() {
+  return Array.from(document.querySelectorAll('#analyticsContainer .card-header span'))
+    .map(span => {
+      const text = span.textContent.trim();
+      for (const [key, title] of Object.entries(boardTitleMap)) {
+        if (title === text) return key;
+      }
+      return null;
+    }).filter(Boolean);
+}
+
+// ==========================
+// Analytics Chart Handling
+// ==========================
+document.getElementById("addChartSelect").addEventListener("change", function () {
+  const value = this.value;
+  if (!value) return;
+  addChart(value);
+  this.value = "";
+});
+
+function addChart(type) {
+  if (getCurrentBoardTypes().includes(type)) return; // no duplicates
+
+  const container = document.getElementById("analyticsContainer");
+  const card = document.createElement("div");
+  card.className = "col-md-6";
+
+  const cardId = `chart-${chartIdCounter++}`;
+  card.innerHTML = `
+    <div class="card card-shadow h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>${boardTitleMap[type]}</span>
+        <button class="btn btn-sm btn-outline-danger remove-widget" title="${LANGUAGES[currentLang].remove}">&times;</button>
+      </div>
+      <div class="card-body"><canvas id="${cardId}"></canvas></div>
+    </div>
+  `;
+
+  container.appendChild(card);
+  chartInstances[cardId] = renderChart(cardId, type);
+
+  saveBoards(getCurrentBoardTypes());
+
+  card.querySelector(".remove-widget").addEventListener("click", () => {
+    chartInstances[cardId].destroy();
+    delete chartInstances[cardId];
+    card.remove();
+    saveBoards(getCurrentBoardTypes());
+  });
+}
+
+function renderChart(canvasId, type) {
+  const ctx = document.getElementById(canvasId).getContext("2d");
+  let data = { labels: [], datasets: [] };
+  let options = { scales: { y: { beginAtZero: true } } };
+  let chartType = "bar";
+
+  const filteredTasks = (filterFn) => tasksCache.filter(t => !(t.deleted && !t.done) && filterFn(t));
+
+  switch (type) {
+    case "weekly": {
+      const today = new Date();
+      const labels = [];
+      const counts = [];
+      for (let i = 3; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(today.getDate() - i * 7);
+        labels.push(d.toISOString().split("T")[0]);
+        const c = filteredTasks(t => {
+          const td = new Date(t.date);
+          return t.done && ((today - td) / 86400000) >= i * 7 && ((today - td) / 86400000) < (i + 1) * 7;
+        }).length;
+        counts.push(c);
+      }
+      data = {
+        labels,
+        datasets: [{
+          label: LANGUAGES[currentLang].chartLabels.completedTasks,
+          data: counts,
+          backgroundColor: "rgba(75,192,192,0.5)"
+        }]
+      };
+      break;
+    }
+
+    case "weekdays": {
+      chartType = "pie";
+      const labels = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+      const dataArr = [0,0,0,0,0,0,0];
+      filteredTasks(t => true).forEach(t => {
+        const idx = (new Date(t.date).getDay() + 6) % 7;
+        dataArr[idx]++;
+      });
+      data = {
+        labels,
+        datasets: [{
+          data: dataArr,
+          backgroundColor: [
+            "#FF6384","#36A2EB","#FFCE56","#4BC0C0","#9966FF","#FF9F40","#C9CBCF"
+          ]
+        }]
+      };
+      options = {};
+      break;
+    }
+
+    case "perPerson": {
+      const labels = peopleCache.map(p => p.name);
+      const counts = peopleCache.map(p =>
+        filteredTasks(t => t.assignedTo === p.id).length
+      );
+      data = {
+        labels,
+        datasets: [{
+          label: LANGUAGES[currentLang].chartLabels.unfinishedTasks,
+          data: counts,
+          backgroundColor: "rgba(153,102,255,0.5)"
+        }]
+      };
+      break;
+    }
+
+    case "perPersonFinished": {
+      const labels = peopleCache.map(p => p.name);
+      const counts = peopleCache.map(p =>
+        filteredTasks(t => t.assignedTo === p.id && t.done).length
+      );
+      data = {
+        labels,
+        datasets: [{
+          label: LANGUAGES[currentLang].chartOptions.perPersonFinished,
+          data: counts,
+          backgroundColor: "rgba(75,192,192,0.5)"
+        }]
+      };
+      break;
+    }
+
+    case "perPersonFinishedWeek": {
+      const now = new Date();
+      const start = new Date(now);
+      start.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+      start.setHours(0,0,0,0);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 7);
+      const labels = peopleCache.map(p => p.name);
+      const counts = peopleCache.map(p =>
+        filteredTasks(t => {
+          if (!t.done || t.assignedTo !== p.id) return false;
+          const d = new Date(t.date);
+          return d >= start && d < end;
+        }).length
+      );
+      data = {
+        labels,
+        datasets: [{
+          label: LANGUAGES[currentLang].chartOptions.perPersonFinishedWeek,
+          data: counts,
+          backgroundColor: "rgba(75,192,192,0.5)"
+        }]
+      };
+      break;
+    }
+
+    case "perPersonUnfinished": {
+      const labels = peopleCache.map(p => p.name);
+      const counts = peopleCache.map(p =>
+        filteredTasks(t => t.assignedTo === p.id && !t.done).length
+      );
+      data = {
+        labels,
+        datasets: [{
+          label: LANGUAGES[currentLang].chartOptions.perPersonUnfinished,
+          data: counts,
+          backgroundColor: "rgba(255,99,132,0.5)"
+        }]
+      };
+      break;
+    }
+
+    case "perPersonUnfinishedWeek": {
+      const now = new Date();
+      const start = new Date(now);
+      start.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+      start.setHours(0,0,0,0);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 7);
+      const labels = peopleCache.map(p => p.name);
+      const counts = peopleCache.map(p =>
+        filteredTasks(t => {
+          if (t.done || t.assignedTo !== p.id) return false;
+          const d = new Date(t.date);
+          return d >= start && d < end;
+        }).length
+      );
+      data = {
+        labels,
+        datasets: [{
+          label: LANGUAGES[currentLang].chartOptions.perPersonUnfinishedWeek,
+          data: counts,
+          backgroundColor: "rgba(255,99,132,0.5)"
+        }]
+      };
+      break;
+    }
+
+    case "taskmaster": {
+      const now = new Date();
+      const labels = peopleCache.map(p => p.name);
+      const counts = peopleCache.map(p =>
+        tasksCache.filter(t => {
+          const d = new Date(t.date);
+          return t.done && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() && t.assignedTo === p.id;
+        }).length
+      );
+      data = {
+        labels,
+        datasets: [{
+          label: LANGUAGES[currentLang].chartOptions.taskmaster,
+          data: counts,
+          backgroundColor: "rgba(255,159,64,0.5)"
+        }]
+      };
+      break;
+    }
+
+    case "lazyLegends": {
+      const labels = peopleCache.map(p => p.name);
+      const counts = peopleCache.map(p =>
+        filteredTasks(t => t.assignedTo === p.id && !t.done).length
+      );
+      data = {
+        labels,
+        datasets: [{
+          label: LANGUAGES[currentLang].chartOptions.lazyLegends,
+          data: counts,
+          backgroundColor: "rgba(255,99,132,0.5)"
+        }]
+      };
+      break;
+    }
+
+    case "speedDemons": {
+      const labels = peopleCache.map(p => p.name);
+      const avgDays = peopleCache.map(p => {
+        const times = filteredTasks(t => t.assignedTo === p.id && t.done && t.finished && t.assignedDate)
+          .map(t => {
+            const dDone = new Date(t.finished);
+            const dAssigned = new Date(t.assignedDate);
+            return (dDone - dAssigned) / (1000*60*60*24);
+          });
+        if (times.length === 0) return 0;
+        return times.reduce((a,b) => a+b, 0) / times.length;
+      });
+      data = {
+        labels,
+        datasets: [{
+          label: LANGUAGES[currentLang].chartOptions.speedDemons,
+          data: avgDays,
+          backgroundColor: "rgba(54,162,235,0.5)"
+        }]
+      };
+      break;
+    }
+
+    case "weekendWarriors": {
+      const labels = peopleCache.map(p => p.name);
+      const counts = peopleCache.map(p =>
+        filteredTasks(t => {
+          if (!t.done || t.assignedTo !== p.id) return false;
+          const d = new Date(t.date);
+          return d.getDay() === 0 || d.getDay() === 6;
+        }).length
+      );
+      data = {
+        labels,
+        datasets: [{
+          label: LANGUAGES[currentLang].chartOptions.weekendWarriors,
+          data: counts,
+          backgroundColor: "rgba(255,206,86,0.5)"
+        }]
+      };
+      break;
+    }
+
+    case "slacker9000": {
+      const labels = peopleCache.map(p => p.name);
+      const ages = peopleCache.map(p => {
+        const openTasks = filteredTasks(t => t.assignedTo === p.id && !t.done && t.assignedDate);
+        if (openTasks.length === 0) return 0;
+        const now = new Date();
+        return Math.max(...openTasks.map(t => (now - new Date(t.assignedDate)) / (1000*60*60*24)));
+      });
+      data = {
+        labels,
+        datasets: [{
+          label: LANGUAGES[currentLang].chartOptions.slacker9000,
+          data: ages,
+          backgroundColor: "rgba(153,102,255,0.5)"
+        }]
+      };
+      break;
+    }
+
+    default:
+      data = { labels: [], datasets: [] };
+      break;
+  }
+
+  const chart = new Chart(ctx, { type: chartType, data, options });
+  chart.boardType = type;
+  return chart;
+}
+
+// ==========================
+// Theme, Språk och Init
+// ==========================
+function updateAllCharts() {
+  for (const [id, chart] of Object.entries(chartInstances)) {
+    const type = chart.boardType || "weekly";
+  }
+}
+
+const root = document.documentElement;
+const themeBtn = document.getElementById("themeToggle");
+const themeIcon = document.getElementById("themeIcon");
+const STORAGE_KEY = "mmm-chores-theme";
+
+const savedTheme = localStorage.getItem(STORAGE_KEY) || "light";
+root.setAttribute("data-theme", savedTheme);
+setIcon(savedTheme);
+
+themeBtn.addEventListener("click", () => {
+  const current = root.getAttribute("data-theme");
+  const theme = current === "dark" ? "light" : "dark";
+  root.setAttribute("data-theme", theme);
+  localStorage.setItem(STORAGE_KEY, theme);
+  setIcon(theme);
+});
+
+function setIcon(theme) {
+  themeIcon.className = theme === "dark"
+    ? "bi bi-moon-stars-fill"
+    : "bi bi-brightness-high-fill";
+}
+
+async function initApp() {
+  const userSettings = await fetchUserSettings();
+  customLevelTitles = userSettings.customLevelTitles || {};
+  if (userPermission !== 'write') {
+    const personForm = document.getElementById('personForm');
+    if (personForm) personForm.style.display = 'none';
+    const taskForm = document.getElementById('taskForm');
+    if (taskForm) taskForm.style.display = 'none';
+  }
+  if (typeof userSettings.levelingEnabled === "boolean") {
+    levelingEnabled = userSettings.levelingEnabled;
+  }
+  if (userSettings.settings) {
+    settingsMode = userSettings.settings;
+  }
+  if (userSettings.language && LANGUAGES[userSettings.language]) {
+    currentLang = userSettings.language;
+  } else {
+    currentLang = localStorage.getItem("mmm-chores-lang") || 'en';
+  }
+  dateFormatting = userSettings.dateFormatting || '';
+
+  const selector = document.createElement("select");
+  selector.className = "language-select";
+  Object.keys(LANGUAGES).forEach(lang => {
+    const opt = document.createElement("option");
+    opt.value = lang;
+    opt.textContent = lang.toUpperCase();
+    if (lang === currentLang) opt.selected = true;
+    selector.appendChild(opt);
+  });
+  selector.addEventListener("change", async e => {
+    const newLang = e.target.value;
+    setLanguage(newLang);
+    await saveUserLanguage(newLang);
+  });
+
+  const controls = document.querySelector(".top-controls");
+  if (controls) {
+    controls.appendChild(selector);
+  } else {
+    document.body.appendChild(selector);
+  }
+
+  const aiButton = document.getElementById("btnAiGenerate");
+  if (aiButton && userSettings.useAI === false) {
+    aiButton.style.display = "none";
+  }
+
+  const logoutBtn = document.getElementById('logoutBtn');
+  if (!loginEnabled) {
+    if (logoutBtn) logoutBtn.style.display = 'none';
+  } else if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      try { await authFetch('/api/logout', { method: 'POST' }); } catch (e) {}
+      localStorage.removeItem('choresToken');
+      window.location.reload();
+    });
+  }
+
+  initSettingsForm(userSettings);
+
+  setLanguage(currentLang);
+  await applySettings(userSettings);
+
+  const savedBoards = await fetchSavedBoards();
+    if (savedBoards.length) {
+      savedBoards.forEach(type => addChart(type));
+    }
+
+  const settingsBtn = document.getElementById("settingsBtn");
+  const settingsModalEl = document.getElementById("settingsModal");
+  const settingsForm = document.getElementById("settingsForm");
+  const lockedMsg = document.getElementById("settingsLockedMsg");
+  const modal = settingsModalEl ? new bootstrap.Modal(settingsModalEl) : null;
+  if (settingsBtn && modal) {
+    settingsBtn.addEventListener('click', () => {
+      settingsChanged = false;
+      settingsSaved = false;
+      if (settingsMode === 'unlocked') {
+        if (lockedMsg) lockedMsg.classList.add('d-none');
+        if (settingsForm) settingsForm.classList.remove('d-none');
+        modal.show();
+        return;
+      }
+
+      if (/^\d{6}$/.test(settingsMode)) {
+        const pin = prompt(LANGUAGES[currentLang].settingsEnterPin);
+        if (pin === settingsMode) {
+          settingsMode = 'unlocked';
+          if (lockedMsg) lockedMsg.classList.add('d-none');
+          if (settingsForm) settingsForm.classList.remove('d-none');
+        } else {
+          if (lockedMsg) {
+            lockedMsg.textContent = LANGUAGES[currentLang].settingsWrongPin;
+            lockedMsg.classList.remove('d-none');
+          }
+          if (settingsForm) settingsForm.classList.add('d-none');
+        }
+        modal.show();
+        return;
+      }
+
+      if (lockedMsg) {
+        lockedMsg.textContent = LANGUAGES[currentLang].settingsLocked;
+        lockedMsg.classList.remove('d-none');
+      }
+      if (settingsForm) settingsForm.classList.add('d-none');
+      modal.show();
+    });
+  }
+
+  if (settingsModalEl) {
+    settingsModalEl.addEventListener('hidden.bs.modal', () => {
+      if (!settingsSaved && settingsChanged) {
+        window.location.reload();
+      }
+    });
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  currentLang = localStorage.getItem('mmm-chores-lang') || currentLang;
+  setLanguage(currentLang);
+  checkLogin();
+});
+
+// ==========================
+// ====== AI GENERATE =======
+// ==========================
+
+// Lägg till denna <button> i din HTML, t.ex. under tasklist:
+// <button id="btnAiGenerate" class="btn btn-outline-primary mb-3" type="button">
+//   <i class="bi bi-stars me-1"></i> AI Generate
+// </button>
+// <div id="toastContainer" style="position:fixed;top:20px;right:20px;z-index:10000;"></div>
+
+// Toast/notification utility
+function showToast(msg, type = "danger", duration = 4000) {
+  let container = document.getElementById("toastContainer");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "toastContainer";
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement("div");
+  toast.className = `toast align-items-center text-bg-${type} border-0 show`;
+  toast.style.minWidth = "200px";
+  toast.role = "alert";
+  toast.innerHTML = `
+    <div class="d-flex">
+      <div class="toast-body">${msg}</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>`;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), duration);
+  toast.querySelector("button").onclick = () => toast.remove();
+}
+
+// AI Generate button handler
+const aiBtn = document.getElementById("btnAiGenerate");
+if (aiBtn) {
+  aiBtn.onclick = async function () {
+    aiBtn.disabled = true;
+    aiBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>AI...`;
+
+    try {
+      const res = await authFetch('/api/ai-generate', { method: "POST" });
+      const data = await res.json();
+
+      if (!data.success) {
+        showToast(data.error || "AI generation failed.", "danger", 7000);
+      } else {
+        showToast(`AI generated ${data.count} tasks!`, "success", 4000);
+        await fetchTasks();
+      }
+    } catch (e) {
+      showToast("AI generation failed. Server error.", "danger", 7000);
+    } finally {
+      aiBtn.disabled = false;
+      aiBtn.innerHTML = `<i class="bi bi-stars me-1"></i> ${LANGUAGES[currentLang].aiGenerateButton}`;
+    }
+  };
+}
