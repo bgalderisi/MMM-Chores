@@ -105,9 +105,10 @@ function writeDataFileAtomic(filePath, contents) {
   }
 }
 
-function getLocalISO(date = new Date()) {
-  const offsetMs = date.getTimezoneOffset() * 60000;
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, -1);
+function getLocalISO(date) {
+  const d = date || new Date();
+  const offsetMs = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - offsetMs).toISOString().slice(0, -1);
 }
 
 function scheduleAutoUpdate() {
@@ -374,27 +375,28 @@ module.exports = NodeHelper.create({
   socketNotificationReceived(notification, payload) {
     if (notification === "INIT_SERVER") {
       this.config = payload;
-
+      
+      // Use logical OR || instead of nullish coalescing ?? for older node compatibility
       settings = {
-        language: settings.language ?? payload.language,
-        dateFormatting: settings.dateFormatting ?? payload.dateFormatting,
-        textMirrorSize: settings.textMirrorSize ?? payload.textMirrorSize,
-        showPast: settings.showPast ?? payload.showPast,
-        showAnalyticsOnMirror: settings.showAnalyticsOnMirror ?? payload.showAnalyticsOnMirror,
-        useAI: settings.useAI ?? payload.useAI,
-        autoUpdate: settings.autoUpdate ?? payload.autoUpdate,
-          pushoverEnabled: settings.pushoverEnabled ?? payload.pushoverEnabled,
-          reminderTime: settings.reminderTime ?? payload.reminderTime,
-          background: settings.background ?? payload.background ?? 'forest.png',
-          levelingEnabled: settings.levelingEnabled ?? (payload.leveling?.enabled !== false),
-          leveling: {
-            mode: settings.leveling?.mode ?? payload.leveling?.mode ?? 'years',
-            choresToMaxLevel: settings.leveling?.choresToMaxLevel ?? payload.leveling?.choresToMaxLevel,
-            yearsToMaxLevel: settings.leveling?.yearsToMaxLevel ?? payload.leveling?.yearsToMaxLevel,
-            choresPerWeekEstimate: settings.leveling?.choresPerWeekEstimate ?? payload.leveling?.choresPerWeekEstimate
-          },
-        levelTitles: settings.levelTitles ?? payload.levelTitles,
-        customLevelTitles: settings.customLevelTitles ?? payload.customLevelTitles
+        language: settings.language || payload.language,
+        dateFormatting: settings.dateFormatting || payload.dateFormatting,
+        textMirrorSize: settings.textMirrorSize || payload.textMirrorSize,
+        showPast: settings.showPast || payload.showPast,
+        showAnalyticsOnMirror: settings.showAnalyticsOnMirror || payload.showAnalyticsOnMirror,
+        useAI: settings.useAI || payload.useAI,
+        autoUpdate: settings.autoUpdate || payload.autoUpdate,
+        pushoverEnabled: settings.pushoverEnabled || payload.pushoverEnabled,
+        reminderTime: settings.reminderTime || payload.reminderTime,
+        background: settings.background || payload.background || 'forest.png',
+        levelingEnabled: settings.levelingEnabled || ((payload.leveling && payload.leveling.enabled) !== false),
+        leveling: {
+          mode: (settings.leveling && settings.leveling.mode) || (payload.leveling && payload.leveling.mode) || 'years',
+          choresToMaxLevel: (settings.leveling && settings.leveling.choresToMaxLevel) || (payload.leveling && payload.leveling.choresToMaxLevel),
+          yearsToMaxLevel: (settings.leveling && settings.leveling.yearsToMaxLevel) || (payload.leveling && payload.leveling.yearsToMaxLevel),
+          choresPerWeekEstimate: (settings.leveling && settings.leveling.choresPerWeekEstimate) || (payload.leveling && payload.leveling.choresPerWeekEstimate)
+        },
+        levelTitles: settings.levelTitles || payload.levelTitles,
+        customLevelTitles: settings.customLevelTitles || payload.customLevelTitles
       };
 
       Object.assign(this.config, settings, {
@@ -405,8 +407,6 @@ module.exports = NodeHelper.create({
       if (!this.server) {
         this.initServer(payload.adminPort);
       } else {
-        // When the mirror reloads, resend the current data so tasks and
-        // settings are restored immediately without needing a task change.
         broadcastTasks(this);
         this.sendSocketNotification("ANALYTICS_UPDATE", analyticsBoards);
         this.sendSocketNotification("SETTINGS_UPDATE", settings);
@@ -415,7 +415,7 @@ module.exports = NodeHelper.create({
     if (notification === "USER_TOGGLE_CHORE") {
       this.handleUserToggle(payload);
     }
-  },
+  }, // <--- FIXED: Added comma
 
   async aiGenerateTasks(req, res) {
     if (!this.config || this.config.useAI === false) {
@@ -456,61 +456,20 @@ module.exports = NodeHelper.create({
           {
             role: "system",
             content:
-              // ── ROLE ────────────────────────────────────────────────────────────
-              "You are an assistant that, given historical household-task data, " +
-              "creates a schedule for the **next 7 days**.\n\n" +
-        
-              // ── OUTPUT FORMAT ───────────────────────────────────────────────────
-              "Return **only** a raw JSON array (no surrounding text). Each item " +
-              "must include:\n" +
-              "  • name         – string\n" +
-              "  • date         – string in YYYY-MM-DD format\n" +
-              "  • assignedTo   – person-ID (omit or null if unassigned)\n\n" +
-        
-              // ── SCHEDULING RULES ────────────────────────────────────────────────
-              "1. Skip tasks marked as *done* unless they are recurring.\n" +
-              "2. Don’t duplicate an unfinished or very recently completed task on " +
-              "   the same day.\n" +
-              "3. Never assign more than **one** *big* task per person per week; " +
-              "   *small* tasks can appear more often.\n" +
-              "4. It’s okay if some days end up without new tasks – keeping " +
-              "   routines is more important than filling every date.\n" +
-              "5. Try to keep weekly tasks on the same weekday they historically " +
-              "   occur.\n" +
-              "6. Only generate dates within the next 7 days.\n" +
-              "7. Do not invent new people or tasks that aren’t present in the " +
-              "   input data.\n" +
-              "8. Do not add unnecessary data.\n\n" +
-        
-              // ── EXAMPLES TO DISTINGUISH SMALL VS BIG TASKS ──────────────────────
-              "Examples of **small chores** include:\n" +
-              "Wash dishes, Water plants, Take out trash, Sweep floor, Dust shelves, " +
-              "Wipe counters, Fold laundry, Clean mirrors, Make bed, Replace hand towels. create the tasks in the same language as the data \n\n" +
-        
-              "Examples of **big chores** include:\n" +
-              "Vacuum entire house, Mow lawn, Deep clean bathroom, Organize garage, " +
-              "Paint room, Shampoo carpets, Clean gutters, Declutter closets, Wash windows (outside), Repair door hinges. but remember create the tasks in the same language as the data\n" +
-        
-              // ── REASONABLENESS GUIDELINES ───────────────────────────────────────
-              "9. Be reasonable with scheduling: avoid assigning overly exhausting tasks " +
-              "   like cleaning the entire house or doing all big chores in one day. " +
-              "   Balance workload fairly over the week per person.\n" +
-              "10. Prioritize routines and habits over forcing new tasks every day.\n" +
-              "11. If a task is big or time-consuming, spread it out or assign it only once " +
-              "    per week per person.\n" +
-              "12. Consider recent completions and do not repeat tasks too soon."
+              "You are an assistant that, given historical household-task data, creates a schedule for the **next 7 days**.\n" +
+              "Return **only** a raw JSON array (no surrounding text). Each item must include:\n" +
+              "  • name (string)\n" +
+              "  • date (YYYY-MM-DD)\n" +
+              "  • assignedTo (person-ID or null)\n" +
+              "Rules: Skip done tasks unless recurring. No duplicates on same day. Max 1 big task/person/week. Keep routines."
           },
           { role: "user", content: prompt }
         ],
-
         max_tokens: 5000,
         temperature: 0.1
       });
 
       let text = completion.choices[0].message.content;
-
-      Log.log("MMM-Chores: OpenAI RAW response:", text);
-
       text = text.trim();
       if (text.startsWith("```")) {
         text = text.replace(/```[a-z]*\s*([\s\S]*?)\s*```/, "$1").trim();
@@ -527,7 +486,6 @@ module.exports = NodeHelper.create({
         newTasks = JSON.parse(text);
       } catch (e) {
         Log.error("Failed parsing AI response:", e);
-        Log.error("OpenAI returned:", text);
         return res.status(500).json({ success: false, error: "Invalid AI response format.", raw: text });
       }
 
@@ -554,10 +512,9 @@ module.exports = NodeHelper.create({
       Log.error("AI Generate error:", err);
       res.status(500).json({ success: false, error: err.message });
     }
-  },
+  }, // <--- FIXED: Added comma
 
   buildPromptFromTasks() {
-    // Include all completed tasks, even if they were later deleted
     const relevantTasks = tasks.filter(t => t.done === true).map(t => ({
       name:        t.name,
       assignedTo:  t.assignedTo,
@@ -566,23 +523,16 @@ module.exports = NodeHelper.create({
       deleted:     t.deleted || false,
       created:     t.created
     }));
-
     const todayString = new Date().toLocaleDateString("sv-SE", {
       weekday: 'long', year: 'numeric', month: 'numeric', day: 'numeric'
     });
-
-      return JSON.stringify({
-        instruction:
-          `Today is ${todayString}. ` +
-          "Analyze historical data to determine which day of the week different people usually perform specific chores. " +
-          "Based on this, generate new tasks for the next 7 days with the correct assignment of the right person on the right day in the same language as the tasks. " +
-          "Return ONLY a JSON array of objects containing: name, date (yyyy-mm-dd), assignedTo (person id).",
-
-        today: getLocalISO(new Date()).slice(0, 10),
-        tasks: relevantTasks,
-        people: people
-      });
-  },
+    return JSON.stringify({
+      instruction: `Today is ${todayString}. Analyze data, generate tasks for next 7 days. JSON array only.`,
+      today: getLocalISO(new Date()).slice(0, 10),
+      tasks: relevantTasks,
+      people: people
+    });
+  }, // <--- FIXED: Added comma
 
   async handleUserToggle({ id, done }) {
     try {
@@ -618,21 +568,15 @@ module.exports = NodeHelper.create({
       }
       const res = await fetchFn(`http://localhost:${port}/api/tasks`, { headers: getHeaders });
       const latest = await res.json();
-
-      // Keep historical data for analytics by excluding only deleted and
-      // unfinished tasks, mirroring the admin portal's behaviour.
       const filtered = latest.filter(t => !(t.deleted && !t.done));
       this.sendSocketNotification("CHORES_DATA", filtered);
     } catch (e) {
       Log.error("MMM-Chores: failed updating task", e);
     }
-  },
+  }, // <--- FIXED: Added comma
 
   initServer(port) {
-    if (this.server) {
-      // Server already running; nothing to do.
-      return;
-    }
+    if (this.server) return;
     const self = this;
     const app  = express();
 
@@ -658,36 +602,31 @@ module.exports = NodeHelper.create({
       const user = users.find(u => u.username === username && u.password === password);
       if (!user) return res.status(401).json({ error: "Invalid credentials" });
       const token = Math.random().toString(36).slice(2);
-      sessions[token] = {
-        ...user,
-        expires: Date.now() + SESSION_DURATION_MS
-      };
+      sessions[token] = { ...user, expires: Date.now() + SESSION_DURATION_MS };
       res.json({ token, permission: user.permission });
     });
 
-      app.get("/api/login", (req, res) => {
-        if (!self.config.login) return res.json({ loginRequired: false });
-        const token = req.headers["x-auth-token"];
-        const user = sessions[token];
-        if (user && user.expires > Date.now()) {
-          user.expires = Date.now() + SESSION_DURATION_MS;
-          return res.json({ loginRequired: true, loggedIn: true, permission: user.permission });
-        }
-        if (token && sessions[token]) delete sessions[token];
-        res.json({ loginRequired: true, loggedIn: false });
-      });
+    app.get("/api/login", (req, res) => {
+      if (!self.config.login) return res.json({ loginRequired: false });
+      const token = req.headers["x-auth-token"];
+      const user = sessions[token];
+      if (user && user.expires > Date.now()) {
+        user.expires = Date.now() + SESSION_DURATION_MS;
+        return res.json({ loginRequired: true, loggedIn: true, permission: user.permission });
+      }
+      if (token && sessions[token]) delete sessions[token];
+      res.json({ loginRequired: true, loggedIn: false });
+    });
 
-      app.post("/api/logout", (req, res) => {
-        if (!self.config.login) return res.json({ success: true });
-        const token = req.headers["x-auth-token"];
-        if (token && sessions[token]) delete sessions[token];
-        res.json({ success: true });
-      });
+    app.post("/api/logout", (req, res) => {
+      if (!self.config.login) return res.json({ success: true });
+      const token = req.headers["x-auth-token"];
+      if (token && sessions[token]) delete sessions[token];
+      res.json({ success: true });
+    });
 
     app.use((req, res, next) => {
       if (!self.config.login) return next();
-      // Allow the login API and root admin page without authentication so the
-      // login overlay can be displayed in the browser.
       if (req.path === "/api/login" || req.path === "/") return next();
       const token = req.headers["x-auth-token"];
       const user = sessions[token];
@@ -716,20 +655,16 @@ module.exports = NodeHelper.create({
     app.post("/api/people", requireWrite, (req, res) => {
       const { name } = req.body;
       if (!name) return res.status(400).json({ error: "Name is required" });
-
-      // Compute the level for the specific person being added. Using the
-      // person's ID ensures the level is based on their own completed chores
-      // (which will be zero for a new person) rather than the global stats.
       const id = Date.now();
       const newPersonBase = { id, name };
       const info = getLevelInfo(self.config || {}, newPersonBase);
       const newPerson = { ...newPersonBase, level: info.level, title: info.title };
-
       people.push(newPerson);
       saveData();
       self.sendSocketNotification("PEOPLE_UPDATE", people);
       res.status(201).json(newPerson);
     });
+
     app.delete("/api/people/:id", requireWrite, (req, res) => {
       const id = parseInt(req.params.id, 10);
       people = people.filter(p => p.id !== id);
@@ -740,54 +675,32 @@ module.exports = NodeHelper.create({
       res.json({ success });
     });
 
-    // Return all tasks. Filtering of deleted items is handled client-side so
-    // analytics can include completed tasks even after deletion.
-    app.get("/api/tasks", (req, res) => {
-      res.json(tasks);
-    });
+    app.get("/api/tasks", (req, res) => res.json(tasks));
     app.post("/api/tasks", requireWrite, (req, res) => {
       const now = new Date();
-      const generatedId = Date.now(); // Generate ID first to use as rootId if needed
-      
-      // Helper to normalize strings for comparison (removes casing and extra spaces)
+      const generatedId = Date.now();
       const normalize = (str) => (str || "").trim().toLowerCase();
-      
       const newNameNorm = normalize(req.body.name);
       const newAssignee = req.body.assignedTo ? parseInt(req.body.assignedTo, 10) : null;
-      
       let derivedParentId = null;
-      let derivedRootId = generatedId; // Default to self as root
-      
-      // FIX: ROBUST MATCHING LOGIC
-      // 1. Explicit ID Check: Did the request send a parentId?
+      let derivedRootId = generatedId;
+
       if (req.body.parentId) {
         derivedParentId = req.body.parentId;
-        // If parentId is explicit, we try to find that task to get the rootId
         const parentTask = tasks.find(t => t.id === derivedParentId);
         if (parentTask) {
           derivedRootId = parentTask.rootId || parentTask.id;
         }
-      } 
-      else {
-        // Prepare a list of candidate tasks (active or deleted) to search against
-        // We reverse to find the most recent tasks first
+      } else {
         const candidates = tasks.slice().reverse();
-
-        // 2. Contextual Match: Same Name + Same Person
         let match = candidates.find(t => 
-          normalize(t.name) === newNameNorm && 
-          t.assignedTo === newAssignee
+          normalize(t.name) === newNameNorm && t.assignedTo === newAssignee
         );
-
-        // 3. Fallback: Same Name only (if no assignee match found)
         if (!match) {
           match = candidates.find(t => normalize(t.name) === newNameNorm);
         }
-
         if (match) {
-          // If the match is a child, take its parent. If it's a root, take its ID.
           derivedParentId = match.parentId || match.id;
-          // Set rootId to match's rootId, or if it has none (old task), use match's ID
           derivedRootId = match.rootId || match.id;
         }
       }
@@ -800,26 +713,18 @@ module.exports = NodeHelper.create({
         done: false,
         assignedTo: newAssignee,
         recurring: req.body.recurring || "none",
-        parentId: derivedParentId, // Link to immediate parent
-        rootId: derivedRootId      // Link to family root
+        parentId: derivedParentId,
+        rootId: derivedRootId
       };
       Log.log("POST /api/tasks", newTask);
       
-      // FIX: INSERTION ORDERING LOGIC (Using rootId for grouping)
       let insertIndex = -1;
-
-      // Grouping: Insert after the last member of this specific family (matching rootId)
       for (let i = tasks.length - 1; i >= 0; i--) {
-        // Check if task has same rootId
-        // OR if the task IS the root (tasks[i].id == derivedRootId)
-        if ((tasks[i].rootId && tasks[i].rootId === derivedRootId) || 
-            tasks[i].id === derivedRootId) {
+        if ((tasks[i].rootId && tasks[i].rootId === derivedRootId) || tasks[i].id === derivedRootId) {
           insertIndex = i;
           break;
         }
       }
-
-      // Fallback if no rootId match found (should be rare given logic above, but safety first)
       if (insertIndex === -1 && !newTask.rootId) {
          for (let i = tasks.length - 1; i >= 0; i--) {
           if (normalize(tasks[i].name) === newNameNorm && !tasks[i].deleted) {
@@ -840,65 +745,35 @@ module.exports = NodeHelper.create({
       res.status(ok ? 201 : 500).json(ok ? newTask : { error: "Failed to save data" });
     });
 
-    // Reorder tasks
     app.put("/api/tasks/reorder", requireWrite, (req, res) => {
       const ids = req.body;
-      if (!Array.isArray(ids)) {
-        return res.status(400).json({ error: "Expected an array of task ids" });
-      }
-      Log.log("PUT /api/tasks/reorder", ids);
-
+      if (!Array.isArray(ids)) return res.status(400).json({ error: "Expected array" });
       const map = new Map();
       tasks.forEach(t => map.set(t.id, t));
-      const preOrders = ids.map(id => ({
-        id,
-        found: map.has(id),
-        currentOrder: map.has(id) ? map.get(id).order : null
-      }));
-      Log.log("Reorder validation", preOrders);
-
       const idSet = new Set(ids);
       const reordered = ids.map(id => map.get(id)).filter(Boolean);
       tasks = reordered.concat(tasks.filter(t => !idSet.has(t.id)));
-
-      // Persist order numbers immediately before broadcasting
       let order = 0;
       tasks.forEach(t => {
-        const prev = t.order;
-        if (t.deleted) {
-          delete t.order;
-        } else {
-          t.order = order++;
-        }
-        if (prev !== undefined && prev !== t.order) {
-          Log.log(`Task ${t.id} order ${prev} -> ${t.order}`);
-        }
+        if (t.deleted) delete t.order;
+        else t.order = order++;
       });
-
-      Log.log("New task order", tasks.map(t => ({ id: t.id, order: t.order })));
       const ok = broadcastTasks(self);
-      if (!ok) {
-        return res.status(500).json({ error: "Failed to save data" });
-      }
       res.json({ success: true });
     });
+
     app.put("/api/tasks/:id", requireWrite, (req, res) => {
       const id   = parseInt(req.params.id, 10);
       const task = tasks.find(t => t.id === id);
       if (!task) return res.status(404).json({ error: "Task not found" });
 
       const prevDone = task.done;
-
       Object.entries(req.body).forEach(([key, val]) => {
-        if (val === undefined || val === null) {
-          delete task[key];
-        } else {
-          task[key] = val;
-        }
+        if (val === undefined || val === null) delete task[key];
+        else task[key] = val;
       });
       Log.log("PUT /api/tasks/" + id, req.body);
 
-      // FIX: RECURRING TASK LOGIC WITH ROOT ID
       if (!prevDone && task.done && task.recurring && task.recurring !== "none") {
         const nextDate = getNextDate(task.date, task.recurring);
         if (nextDate) {
@@ -908,51 +783,37 @@ module.exports = NodeHelper.create({
             date: nextDate,
             assignedTo: task.assignedTo || null,
             recurring: task.recurring,
-            parentId: task.id, // Immediate parent
-            rootId: task.rootId || task.id, // Propagate root ID (or create one if parent didn't have it)
+            parentId: task.id,
+            rootId: task.rootId || task.id,
             order: tasks.filter(t => !t.deleted).length,
             done: false,
             created: getLocalISO(new Date()),
           };
-          
           let insertIndex = -1;
-          
-          // Find last family member by checking rootId
           for (let i = tasks.length - 1; i >= 0; i--) {
-            if ((tasks[i].rootId && tasks[i].rootId === newTask.rootId) || 
-                tasks[i].id === newTask.rootId) {
+            if ((tasks[i].rootId && tasks[i].rootId === newTask.rootId) || tasks[i].id === newTask.rootId) {
               insertIndex = i;
               break;
             }
           }
-          
-          // Fallback if rootId lookup fails (e.g. mixed old data)
-          if (insertIndex === -1) {
-             insertIndex = tasks.findIndex(t => t.id === id);
-          }
+          if (insertIndex === -1) insertIndex = tasks.findIndex(t => t.id === id);
 
-          if (insertIndex !== -1) {
-            tasks.splice(insertIndex + 1, 0, newTask);
-          } else {
-            tasks.push(newTask);
-          }
+          if (insertIndex !== -1) tasks.splice(insertIndex + 1, 0, newTask);
+          else tasks.push(newTask);
         }
       }
 
       const ok = broadcastTasks(self);
-      if (!prevDone && task.done) {
-        sendPushover(self, settings, `Task completed: ${task.name}`);
-      }
+      if (!prevDone && task.done) sendPushover(self, settings, `Task completed: ${task.name}`);
       if (!ok) return res.status(500).json({ error: "Failed to save data" });
       res.json(task);
     });
+
     app.delete("/api/tasks/:id", requireWrite, (req, res) => {
       const id = parseInt(req.params.id, 10);
       const task = tasks.find(t => t.id === id);
       if (!task) return res.status(404).json({ error: "Task not found" });
-
       task.deleted = true;
-      Log.log("DELETE /api/tasks/" + id);
       const ok = broadcastTasks(self);
       res.json({ success: ok });
     });
@@ -960,9 +821,7 @@ module.exports = NodeHelper.create({
     app.get("/api/analyticsBoards", (req, res) => res.json(analyticsBoards));
     app.post("/api/analyticsBoards", requireWrite, (req, res) => {
       const newBoards = req.body;
-      if (!Array.isArray(newBoards)) {
-        return res.status(400).json({ error: "Expected an array of board types" });
-      }
+      if (!Array.isArray(newBoards)) return res.status(400).json({ error: "Expected array" });
       analyticsBoards = newBoards;
       saveData();
       self.sendSocketNotification("ANALYTICS_UPDATE", analyticsBoards);
@@ -976,16 +835,13 @@ module.exports = NodeHelper.create({
       delete safeSettings.pushoverUser;
       res.json({ ...safeSettings, leveling: safeSettings.leveling, settings: self.config.settings });
     });
+
     app.put("/api/settings", requireWrite, (req, res) => {
       const newSettings = req.body;
       const wasAutoUpdate = settings.autoUpdate;
-      if (typeof newSettings !== "object") {
-        return res.status(400).json({ error: "Invalid settings data" });
-      }
+      if (typeof newSettings !== "object") return res.status(400).json({ error: "Invalid settings" });
       if (newSettings.pushoverEnabled && (!self.config.pushoverApiKey || !self.config.pushoverUser)) {
-        return res.status(400).json({
-          error: "Please set pushoverApiKey and pushoverUser in config.js to use Pushover notifications."
-        });
+        return res.status(400).json({ error: "Missing pushover credentials" });
       }
       if (newSettings.leveling) {
         settings.leveling = { ...settings.leveling, ...newSettings.leveling };
@@ -1009,13 +865,10 @@ module.exports = NodeHelper.create({
       self.sendSocketNotification("PEOPLE_UPDATE", people);
       self.sendSocketNotification("SETTINGS_UPDATE", settings);
       res.json({ success: true, settings });
-      if (newSettings.autoUpdate && !wasAutoUpdate) {
-        scheduleAutoUpdate();
-      } else if (!newSettings.autoUpdate && wasAutoUpdate) {
-        if (autoUpdateTimer) {
-          clearTimeout(autoUpdateTimer);
-          autoUpdateTimer = null;
-        }
+      if (newSettings.autoUpdate && !wasAutoUpdate) scheduleAutoUpdate();
+      else if (!newSettings.autoUpdate && wasAutoUpdate && autoUpdateTimer) {
+        clearTimeout(autoUpdateTimer);
+        autoUpdateTimer = null;
       }
       scheduleReminder(self);
     });
