@@ -851,20 +851,93 @@ module.exports = NodeHelper.create({
       res.status(ok ? 201 : 500).json(ok ? newTask : { error: "Failed to save data" });
     });
 
+// Reorder tasks (Move entire family + Sort by Date)
     app.put("/api/tasks/reorder", requireWrite, (req, res) => {
       const ids = req.body;
-      if (!Array.isArray(ids)) return res.status(400).json({ error: "Expected array" });
-      const map = new Map();
-      tasks.forEach(t => map.set(t.id, t));
-      const idSet = new Set(ids);
-      const reordered = ids.map(id => map.get(id)).filter(Boolean);
-      tasks = reordered.concat(tasks.filter(t => !idSet.has(t.id)));
+      if (!Array.isArray(ids)) {
+        return res.status(400).json({ error: "Expected an array of task ids" });
+      }
+      Log.log("PUT /api/tasks/reorder", ids);
+
+      // 1. Group all existing tasks by their family (rootId)
+      const familyMap = new Map();
+      const taskLookup = new Map();
+      
+      tasks.forEach(t => {
+        taskLookup.set(t.id, t);
+        
+        // Determine family root. If no rootId, the task itself is the root.
+        const root = t.rootId || t.id;
+        if (!familyMap.has(root)) {
+          familyMap.set(root, []);
+        }
+        familyMap.get(root).push(t);
+      });
+
+      // 2. Sort each family internally by date (Earliest -> Latest)
+      familyMap.forEach((familyTasks) => {
+        familyTasks.sort((a, b) => {
+          // Primary sort: Date string (ISO yyyy-mm-dd works with string comparison)
+          if (a.date < b.date) return -1;
+          if (a.date > b.date) return 1;
+          // Secondary sort: Created timestamp (preserve creation order if same day)
+          if (a.created < b.created) return -1;
+          if (a.created > b.created) return 1;
+          return 0;
+        });
+      });
+
+      // 3. Construct the new order based on the incoming ID list
+      const newList = [];
+      const processedRoots = new Set();
+
+      // Iterate through the user's requested order
+      ids.forEach(id => {
+        const task = taskLookup.get(id);
+        if (task) {
+          const root = task.rootId || task.id;
+          
+          // If we haven't processed this family yet, add the WHOLE family now
+          if (!processedRoots.has(root)) {
+            const familyMembers = familyMap.get(root);
+            if (familyMembers) {
+              familyMembers.forEach(member => newList.push(member));
+            }
+            processedRoots.add(root);
+          }
+        }
+      });
+
+      // 4. Append any families that weren't in the input 'ids' array 
+      // (e.g., tasks filtered out of the current UI view)
+      tasks.forEach(t => {
+        const root = t.rootId || t.id;
+        if (!processedRoots.has(root)) {
+          const familyMembers = familyMap.get(root);
+          if (familyMembers) {
+             familyMembers.forEach(member => newList.push(member));
+          }
+          processedRoots.add(root);
+        }
+      });
+
+      // 5. Apply the new list and re-index
+      tasks = newList;
+
       let order = 0;
       tasks.forEach(t => {
-        if (t.deleted) delete t.order;
-        else t.order = order++;
+        if (t.deleted) {
+          delete t.order;
+        } else {
+          t.order = order++;
+        }
       });
+
+      Log.log("New task order applied with family grouping.");
       const ok = broadcastTasks(self);
+      if (!ok) {
+        return res.status(500).json({ error: "Failed to save data" });
+      }
       res.json({ success: true });
     });
 
