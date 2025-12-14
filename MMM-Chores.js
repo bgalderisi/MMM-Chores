@@ -466,8 +466,8 @@ Module.register("MMM-Chores", {
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.checked = task.done;
-      cb.style.marginRight = "20px"; // Your custom spacing
-      cb.style.transform = "scale(1.5)"; // Your custom size
+      //cb.style.marginRight = "20px"; // Your custom spacing
+      //cb.style.transform = "scale(1.5)"; // Your custom size
       cb.addEventListener("change", () => {
         li.classList.add("moving");
         setTimeout(() => this.toggleDone(task, cb.checked), 200);
