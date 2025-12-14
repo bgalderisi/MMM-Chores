@@ -747,6 +747,7 @@ module.exports = NodeHelper.create({
     });
     app.post("/api/tasks", requireWrite, (req, res) => {
       const now = new Date();
+      const generatedId = Date.now(); // Generate ID first to use as rootId if needed
       
       // Helper to normalize strings for comparison (removes casing and extra spaces)
       const normalize = (str) => (str || "").trim().toLowerCase();
@@ -755,11 +756,17 @@ module.exports = NodeHelper.create({
       const newAssignee = req.body.assignedTo ? parseInt(req.body.assignedTo, 10) : null;
       
       let derivedParentId = null;
+      let derivedRootId = generatedId; // Default to self as root
       
       // FIX: ROBUST MATCHING LOGIC
       // 1. Explicit ID Check: Did the request send a parentId?
       if (req.body.parentId) {
         derivedParentId = req.body.parentId;
+        // If parentId is explicit, we try to find that task to get the rootId
+        const parentTask = tasks.find(t => t.id === derivedParentId);
+        if (parentTask) {
+          derivedRootId = parentTask.rootId || parentTask.id;
+        }
       } 
       else {
         // Prepare a list of candidate tasks (active or deleted) to search against
@@ -780,35 +787,41 @@ module.exports = NodeHelper.create({
         if (match) {
           // If the match is a child, take its parent. If it's a root, take its ID.
           derivedParentId = match.parentId || match.id;
+          // Set rootId to match's rootId, or if it has none (old task), use match's ID
+          derivedRootId = match.rootId || match.id;
         }
       }
 
       const newTask = {
-        id: Date.now(),
+        id: generatedId,
         ...req.body,
         created: getLocalISO(now),
         order: tasks.filter(t => !t.deleted).length,
         done: false,
         assignedTo: newAssignee,
         recurring: req.body.recurring || "none",
-        parentId: derivedParentId, // Link to existing family
+        parentId: derivedParentId, // Link to immediate parent
+        rootId: derivedRootId      // Link to family root
       };
       Log.log("POST /api/tasks", newTask);
       
-      // FIX: INSERTION ORDERING LOGIC
+      // FIX: INSERTION ORDERING LOGIC (Using rootId for grouping)
       let insertIndex = -1;
 
-      if (newTask.parentId) {
-        // Grouping: Insert after the last member of this specific family
-        for (let i = tasks.length - 1; i >= 0; i--) {
-          if (tasks[i].id === newTask.parentId || tasks[i].parentId === newTask.parentId) {
-            insertIndex = i;
-            break;
-          }
+      // Grouping: Insert after the last member of this specific family (matching rootId)
+      for (let i = tasks.length - 1; i >= 0; i--) {
+        // Check if task has same rootId
+        // OR if the task IS the root (tasks[i].id == derivedRootId)
+        if ((tasks[i].rootId && tasks[i].rootId === derivedRootId) || 
+            tasks[i].id === derivedRootId) {
+          insertIndex = i;
+          break;
         }
-      } else {
-        // Fallback Grouping: If no parent found, try to group by name one last time
-        for (let i = tasks.length - 1; i >= 0; i--) {
+      }
+
+      // Fallback if no rootId match found (should be rare given logic above, but safety first)
+      if (insertIndex === -1 && !newTask.rootId) {
+         for (let i = tasks.length - 1; i >= 0; i--) {
           if (normalize(tasks[i].name) === newNameNorm && !tasks[i].deleted) {
             insertIndex = i;
             break;
@@ -885,7 +898,7 @@ module.exports = NodeHelper.create({
       });
       Log.log("PUT /api/tasks/" + id, req.body);
 
-      // FIX: RECURRING TASK LOGIC WITH PARENT ID AND ORDERING
+      // FIX: RECURRING TASK LOGIC WITH ROOT ID
       if (!prevDone && task.done && task.recurring && task.recurring !== "none") {
         const nextDate = getNextDate(task.date, task.recurring);
         if (nextDate) {
@@ -895,20 +908,27 @@ module.exports = NodeHelper.create({
             date: nextDate,
             assignedTo: task.assignedTo || null,
             recurring: task.recurring,
-            parentId: task.id, // Store parent ID
+            parentId: task.id, // Immediate parent
+            rootId: task.rootId || task.id, // Propagate root ID (or create one if parent didn't have it)
             order: tasks.filter(t => !t.deleted).length,
             done: false,
             created: getLocalISO(new Date()),
           };
           
-          let insertIndex = tasks.findIndex(t => t.id === id);
+          let insertIndex = -1;
           
-          // Find last family member (parent or children)
-          for (let i = tasks.length - 1; i > insertIndex; i--) {
-            if (tasks[i].parentId === id) {
+          // Find last family member by checking rootId
+          for (let i = tasks.length - 1; i >= 0; i--) {
+            if ((tasks[i].rootId && tasks[i].rootId === newTask.rootId) || 
+                tasks[i].id === newTask.rootId) {
               insertIndex = i;
               break;
             }
+          }
+          
+          // Fallback if rootId lookup fails (e.g. mixed old data)
+          if (insertIndex === -1) {
+             insertIndex = tasks.findIndex(t => t.id === id);
           }
 
           if (insertIndex !== -1) {
