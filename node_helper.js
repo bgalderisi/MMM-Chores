@@ -59,6 +59,8 @@ function applyLoadedData(json, sourceLabel = "data.json") {
       return (a.order || 0) - (b.order || 0);
     });
   }
+  
+  // Clean up order on load
   let order = 0;
   tasks.forEach(t => {
     if (t.deleted) {
@@ -71,6 +73,8 @@ function applyLoadedData(json, sourceLabel = "data.json") {
   people          = json.people          || [];
   analyticsBoards = json.analyticsBoards || [];
   settings        = json.settings        || {};
+  
+  // Strip sensitive keys if they accidentally got saved
   if (settings.openaiApiKey !== undefined) delete settings.openaiApiKey;
   if (settings.pushoverApiKey !== undefined) delete settings.pushoverApiKey;
   if (settings.pushoverUser !== undefined) delete settings.pushoverUser;
@@ -167,14 +171,12 @@ function scheduleReminder(self) {
   }, delay);
 }
 
-// FIX: AUTOMATED NIGHTLY TASK GENERATION
 function scheduleMidnightScan(helper) {
   if (midnightScanTimer) clearTimeout(midnightScanTimer);
   
   const now = new Date();
   const next = new Date(now);
-  // Set to 00:01:00 (1 minute past midnight)
-  next.setHours(0, 1, 0, 0);
+  next.setHours(0, 1, 0, 0); // 1 minute past midnight
   
   if (next <= now) {
     next.setDate(next.getDate() + 1);
@@ -198,12 +200,10 @@ function scanForMissedRecurrences(helper) {
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayStr = getLocalISO(yesterday).slice(0, 10);
 
-  // Snapshot array to safely iterate
   const currentTasks = [...tasks];
   let generatedCount = 0;
 
   currentTasks.forEach(task => {
-    // Check for non-deleted, recurring tasks dated yesterday
     if (!task.deleted && task.recurring && task.recurring !== "none" && task.date === yesterdayStr) {
       const created = generateNextRecurringTask(task);
       if (created) generatedCount++;
@@ -218,12 +218,11 @@ function scanForMissedRecurrences(helper) {
   }
 }
 
-// FIX: SHARED GENERATOR LOGIC (Used by both manual complete and nightly scan)
+// SHARED GENERATOR LOGIC
 function generateNextRecurringTask(task) {
   const nextDate = getNextDate(task.date, task.recurring);
   if (!nextDate) return false;
 
-  // Duplicate Check: Same family, same date?
   const familyRootId = task.rootId || task.id;
   const alreadyExists = tasks.some(t => 
     !t.deleted && 
@@ -235,7 +234,7 @@ function generateNextRecurringTask(task) {
   if (alreadyExists) return false;
 
   const newTask = {
-    id: Date.now() + Math.floor(Math.random() * 100), // Random offset to avoid collision during batch generation
+    id: Date.now() + Math.floor(Math.random() * 100),
     name: task.name,
     date: nextDate,
     assignedTo: task.assignedTo || null,
@@ -247,25 +246,7 @@ function generateNextRecurringTask(task) {
     created: getLocalISO(new Date()),
   };
   
-  // Insert Logic
-  let insertIndex = -1;
-  for (let i = tasks.length - 1; i >= 0; i--) {
-    if ((tasks[i].rootId && tasks[i].rootId === newTask.rootId) || tasks[i].id === newTask.rootId) {
-      insertIndex = i;
-      break;
-    }
-  }
-  // Fallback if not found via rootId
-  if (insertIndex === -1) {
-      insertIndex = tasks.findIndex(t => t.id === task.id);
-  }
-
-  if (insertIndex !== -1) {
-    tasks.splice(insertIndex + 1, 0, newTask);
-  } else {
-    tasks.push(newTask);
-  }
-  
+  tasks.push(newTask);
   return true;
 }
 
@@ -412,8 +393,46 @@ function updatePeopleLevels(config) {
   });
 }
 
+// FIX: New helper to group families together to prevent fragmentation
+function defragmentTasks() {
+  Log.log("Defragmenting tasks (Grouping families)...");
+  
+  // 1. Group by rootId
+  const familyMap = new Map();
+  const rootsOrder = []; // To preserve relative order of families
+  
+  tasks.forEach(t => {
+    // Determine family root
+    const root = t.rootId || t.id;
+    if (!familyMap.has(root)) {
+      familyMap.set(root, []);
+      rootsOrder.push(root); // Record first time we see this family
+    }
+    familyMap.get(root).push(t);
+  });
+
+  // 2. Sort internals of each family by Date
+  familyMap.forEach(famTasks => {
+    famTasks.sort((a, b) => {
+      if (a.date < b.date) return -1;
+      if (a.date > b.date) return 1;
+      if (a.created < b.created) return -1;
+      if (a.created > b.created) return 1;
+      return 0;
+    });
+  });
+
+  // 3. Rebuild list
+  const newList = [];
+  rootsOrder.forEach(root => {
+    const famTasks = familyMap.get(root);
+    famTasks.forEach(t => newList.push(t));
+  });
+  
+  tasks = newList;
+}
+
 function applyTaskOrder() {
-  Log.log(`applyTaskOrder: before ${tasks.length} tasks`);
   let idx = 0;
   tasks.forEach(t => {
     if (t.deleted) {
@@ -422,21 +441,15 @@ function applyTaskOrder() {
       t.order = idx++;
     }
   });
-  Log.log(`applyTaskOrder: after ${tasks.length} tasks`);
 }
 
 function broadcastTasks(helper) {
-  // Match the admin portal's analytics logic by excluding tasks that are both
-  // deleted and unfinished. Completed tasks remain even if deleted so that
-  // historical analytics are consistent across the mirror and the admin page.
   Log.log(`broadcastTasks: start ${tasks.length} tasks`);
+  
+  // FIX: Force family grouping before saving/sending
+  defragmentTasks();
   applyTaskOrder();
-  tasks.sort((a, b) => {
-    if (a.deleted && !b.deleted) return 1;
-    if (!a.deleted && b.deleted) return -1;
-    return (a.order || 0) - (b.order || 0);
-  });
-  Log.log(`broadcastTasks: after sort ${tasks.length} tasks`);
+
   const analyticsData = tasks.filter(t => !(t.deleted && !t.done));
 
   updatePeopleLevels(helper.config || {});
@@ -474,9 +487,8 @@ module.exports = NodeHelper.create({
     }
     scheduleReminder(this);
     
-    // FIX: Init nightly scan
-    scanForMissedRecurrences(this); // Check immediately on startup
-    scheduleMidnightScan(this);     // Schedule next run
+    scanForMissedRecurrences(this);
+    scheduleMidnightScan(this);
   },
 
   socketNotificationReceived(notification, payload) {
@@ -824,49 +836,23 @@ module.exports = NodeHelper.create({
       };
       Log.log("POST /api/tasks", newTask);
       
-      let insertIndex = -1;
-      for (let i = tasks.length - 1; i >= 0; i--) {
-        if ((tasks[i].rootId && tasks[i].rootId === derivedRootId) || tasks[i].id === derivedRootId) {
-          insertIndex = i;
-          break;
-        }
-      }
-      if (insertIndex === -1 && !newTask.rootId) {
-         for (let i = tasks.length - 1; i >= 0; i--) {
-          if (normalize(tasks[i].name) === newNameNorm && !tasks[i].deleted) {
-            insertIndex = i;
-            break;
-          }
-        }
-      }
-
-      if (insertIndex !== -1) {
-        tasks.splice(insertIndex + 1, 0, newTask);
-      } else {
-        tasks.push(newTask);
-      }
+      // Just push. broadcastTasks() will defragment it to the right place.
+      tasks.push(newTask);
       
       sendPushover(self, settings, `New task: ${newTask.name}`);
       const ok = broadcastTasks(self);
       res.status(ok ? 201 : 500).json(ok ? newTask : { error: "Failed to save data" });
     });
 
-// Reorder tasks (Move entire family + Sort by Date)
     app.put("/api/tasks/reorder", requireWrite, (req, res) => {
       const { ids, movedId } = req.body;
-      
-      // Handle legacy frontend calls (just in case)
       const idList = Array.isArray(ids) ? ids : (Array.isArray(req.body) ? req.body : []);
       
-      if (!idList.length) {
-        return res.status(400).json({ error: "Expected task ids" });
-      }
+      if (!idList.length) return res.status(400).json({ error: "Expected task ids" });
       Log.log("PUT /api/tasks/reorder", idList.length, "tasks. Moved:", movedId);
 
-      // 1. Group all tasks by family (rootId)
       const familyMap = new Map();
       const taskLookup = new Map();
-      
       tasks.forEach(t => {
         taskLookup.set(t.id, t);
         const root = t.rootId || t.id;
@@ -874,7 +860,6 @@ module.exports = NodeHelper.create({
         familyMap.get(root).push(t);
       });
 
-      // 2. Sort families internally by date
       familyMap.forEach((familyTasks) => {
         familyTasks.sort((a, b) => {
           if (a.date < b.date) return -1;
@@ -885,7 +870,6 @@ module.exports = NodeHelper.create({
         });
       });
 
-      // 3. Determine the Active Family (the one being moved)
       let activeRootId = null;
       if (movedId) {
         const movedTask = taskLookup.get(movedId);
@@ -894,27 +878,20 @@ module.exports = NodeHelper.create({
         }
       }
 
-      // 4. Calculate Family Rank based on the input list
-      // - If it's the Active Family, rank is determined ONLY by the 'movedId' position.
-      // - If it's any other family, rank is determined by the FIRST time we see it.
       const familyOrder = [];
       const seenRoots = new Set();
 
       idList.forEach(id => {
         const task = taskLookup.get(id);
         if (!task) return;
-
         const root = task.rootId || task.id;
         
-        // If this is the Active Family, ONLY record it when we hit the specific movedId
         if (root === activeRootId) {
           if (id === movedId && !seenRoots.has(root)) {
             familyOrder.push(root);
             seenRoots.add(root);
           }
-        } 
-        // For all other families, record them the first time we see any member
-        else {
+        } else {
           if (!seenRoots.has(root)) {
             familyOrder.push(root);
             seenRoots.add(root);
@@ -922,7 +899,6 @@ module.exports = NodeHelper.create({
         }
       });
 
-      // 5. Append any families not in the view (e.g. filtered out)
       tasks.forEach(t => {
         const root = t.rootId || t.id;
         if (!seenRoots.has(root)) {
@@ -931,14 +907,12 @@ module.exports = NodeHelper.create({
         }
       });
 
-      // 6. Construct Final List
       const newList = [];
       familyOrder.forEach(root => {
         const members = familyMap.get(root) || [];
         members.forEach(m => newList.push(m));
       });
 
-      // 7. Apply & Save
       tasks = newList;
       let order = 0;
       tasks.forEach(t => {
@@ -964,7 +938,6 @@ module.exports = NodeHelper.create({
       });
       Log.log("PUT /api/tasks/" + id, req.body);
 
-      // FIX: CALL SHARED GENERATOR IF TASK COMPLETED
       if (!prevDone && task.done && task.recurring && task.recurring !== "none") {
         const created = generateNextRecurringTask(task);
         if (created) Log.log(`Generated recurring task via completion: ${task.name}`);
@@ -981,22 +954,16 @@ module.exports = NodeHelper.create({
       const task = tasks.find(t => t.id === id);
       if (!task) return res.status(404).json({ error: "Task not found" });
 
-      // FIX: CHAIN HEALING
-      // If we delete a recurring task, we must ensure the NEXT one is generated first
-      // so the schedule doesn't die. (Treat delete as "Skip this instance")
       if (task.recurring && task.recurring !== "none") {
         const nextDate = getNextDate(task.date, task.recurring);
         if (nextDate) {
-           // Check if a successor already exists
            const familyRootId = task.rootId || task.id;
            const successorExists = tasks.some(t => 
              !t.deleted && 
-             t.date >= nextDate && // Any future task
+             t.date >= nextDate && 
              (t.rootId === familyRootId || t.id === familyRootId)
            );
-
            if (!successorExists) {
-             // No future task found? Generate the next one before dying.
              Log.log(`Deleting recurring task ${task.id}. Generating next instance to preserve chain.`);
              generateNextRecurringTask(task);
            }
