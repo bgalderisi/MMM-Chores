@@ -191,6 +191,7 @@ function initSettingsForm(settings) {
   const rewardTitlesContainer = document.getElementById('rewardTitlesContainer');
   const rewardTitleInputs = [];
   const backgroundSelect = document.getElementById('settingsBackground');
+  const includeTaskDate = document.getElementById('settingsincludeTaskDate');
 
   if (showPast) showPast.checked = !!settings.showPast;
   if (textSize) textSize.value = settings.textMirrorSize || 'small';
@@ -206,6 +207,7 @@ function initSettingsForm(settings) {
   if (yearsInput) yearsInput.value = settings.leveling?.yearsToMaxLevel || 3;
   if (perWeekInput) perWeekInput.value = settings.leveling?.choresPerWeekEstimate || 4;
   if (backgroundSelect) backgroundSelect.value = settings.background || 'forest.png';
+  if (includeTaskDate) includeTaskDate.checked = settings.includeTaskDate !== false;
   if (rewardTitlesContainer) {
     rewardTitlesContainer.innerHTML = '';
     const titles = Array.isArray(settings.levelTitles) ? settings.levelTitles : [];
