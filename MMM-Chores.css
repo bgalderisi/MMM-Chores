@@ -28,10 +28,16 @@
 
 /* Checkbox spacing */
 .MMM-Chores li input[type="checkbox"] {
-  margin-right: 10px;
+  margin-right: 25px;
   transform: scale(1.2);
 }
-
+/* Task color based on due-time */
+.MMM-Chores li.overdue-red {
+  color: red;
+}
+.MMM-Chores li.overdue-yellow {
+  color: yellow;;
+}
 /* Strikethrough for completed tasks */
 .MMM-Chores li.task-done {
   text-decoration: line-through;
