@@ -48,6 +48,7 @@ const DEFAULT_TITLES = [
 let settings = {};
 let autoUpdateTimer = null;
 let reminderTimer = null;
+let midnightScanTimer = null;
 
 function applyLoadedData(json, sourceLabel = "data.json") {
   tasks = json.tasks || [];
@@ -164,6 +165,108 @@ function scheduleReminder(self) {
     }
     scheduleReminder(self);
   }, delay);
+}
+
+// FIX: AUTOMATED NIGHTLY TASK GENERATION
+function scheduleMidnightScan(helper) {
+  if (midnightScanTimer) clearTimeout(midnightScanTimer);
+  
+  const now = new Date();
+  const next = new Date(now);
+  // Set to 00:01:00 (1 minute past midnight)
+  next.setHours(0, 1, 0, 0);
+  
+  if (next <= now) {
+    next.setDate(next.getDate() + 1);
+  }
+  
+  const delay = next - now;
+  Log.log(`Next daily task generation scheduled for ${next.toString()}`);
+  
+  midnightScanTimer = setTimeout(() => {
+    midnightScanTimer = null;
+    scanForMissedRecurrences(helper);
+    scheduleMidnightScan(helper);
+  }, delay);
+}
+
+function scanForMissedRecurrences(helper) {
+  Log.log("Scanning for missed recurring tasks from previous day...");
+  
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = getLocalISO(yesterday).slice(0, 10);
+
+  // Snapshot array to safely iterate
+  const currentTasks = [...tasks];
+  let generatedCount = 0;
+
+  currentTasks.forEach(task => {
+    // Check for non-deleted, recurring tasks dated yesterday
+    if (!task.deleted && task.recurring && task.recurring !== "none" && task.date === yesterdayStr) {
+      const created = generateNextRecurringTask(task);
+      if (created) generatedCount++;
+    }
+  });
+
+  if (generatedCount > 0) {
+    Log.log(`Daily Scan: Generated ${generatedCount} new tasks.`);
+    broadcastTasks(helper);
+  } else {
+    Log.log("Daily Scan: No new tasks needed.");
+  }
+}
+
+// FIX: SHARED GENERATOR LOGIC (Used by both manual complete and nightly scan)
+function generateNextRecurringTask(task) {
+  const nextDate = getNextDate(task.date, task.recurring);
+  if (!nextDate) return false;
+
+  // Duplicate Check: Same family, same date?
+  const familyRootId = task.rootId || task.id;
+  const alreadyExists = tasks.some(t => 
+    !t.deleted && 
+    t.date === nextDate && 
+    t.name === task.name &&
+    (t.rootId === familyRootId || t.id === familyRootId)
+  );
+
+  if (alreadyExists) return false;
+
+  const newTask = {
+    id: Date.now() + Math.floor(Math.random() * 100), // Random offset to avoid collision during batch generation
+    name: task.name,
+    date: nextDate,
+    assignedTo: task.assignedTo || null,
+    recurring: task.recurring,
+    parentId: task.id,
+    rootId: familyRootId,
+    order: tasks.filter(t => !t.deleted).length,
+    done: false,
+    created: getLocalISO(new Date()),
+  };
+  
+  // Insert Logic
+  let insertIndex = -1;
+  for (let i = tasks.length - 1; i >= 0; i--) {
+    if ((tasks[i].rootId && tasks[i].rootId === newTask.rootId) || tasks[i].id === newTask.rootId) {
+      insertIndex = i;
+      break;
+    }
+  }
+  // Fallback if not found via rootId
+  if (insertIndex === -1) {
+      insertIndex = tasks.findIndex(t => t.id === task.id);
+  }
+
+  if (insertIndex !== -1) {
+    tasks.splice(insertIndex + 1, 0, newTask);
+  } else {
+    tasks.push(newTask);
+  }
+  
+  return true;
 }
 
 function sendPushover(self, settings, message) {
@@ -370,13 +473,16 @@ module.exports = NodeHelper.create({
       scheduleAutoUpdate();
     }
     scheduleReminder(this);
+    
+    // FIX: Init nightly scan
+    scanForMissedRecurrences(this); // Check immediately on startup
+    scheduleMidnightScan(this);     // Schedule next run
   },
 
   socketNotificationReceived(notification, payload) {
     if (notification === "INIT_SERVER") {
       this.config = payload;
       
-      // Use logical OR || instead of nullish coalescing ?? for older node compatibility
       settings = {
         language: settings.language || payload.language,
         dateFormatting: settings.dateFormatting || payload.dateFormatting,
@@ -415,7 +521,7 @@ module.exports = NodeHelper.create({
     if (notification === "USER_TOGGLE_CHORE") {
       this.handleUserToggle(payload);
     }
-  }, // <--- FIXED: Added comma
+  },
 
   async aiGenerateTasks(req, res) {
     if (!this.config || this.config.useAI === false) {
@@ -512,7 +618,7 @@ module.exports = NodeHelper.create({
       Log.error("AI Generate error:", err);
       res.status(500).json({ success: false, error: err.message });
     }
-  }, // <--- FIXED: Added comma
+  },
 
   buildPromptFromTasks() {
     const relevantTasks = tasks.filter(t => t.done === true).map(t => ({
@@ -532,7 +638,7 @@ module.exports = NodeHelper.create({
       tasks: relevantTasks,
       people: people
     });
-  }, // <--- FIXED: Added comma
+  },
 
   async handleUserToggle({ id, done }) {
     try {
@@ -573,11 +679,10 @@ module.exports = NodeHelper.create({
     } catch (e) {
       Log.error("MMM-Chores: failed updating task", e);
     }
-  }, // <--- FIXED: Added comma
+  },
 
   initServer(port) {
     if (this.server) return;
-    Log.log(`MMM-Chores - initServer - port: ${port}`);
     const self = this;
     const app  = express();
 
@@ -775,53 +880,10 @@ module.exports = NodeHelper.create({
       });
       Log.log("PUT /api/tasks/" + id, req.body);
 
-      // FIX: RECURRING TASK LOGIC WITH DUPLICATE PREVENTION
+      // FIX: CALL SHARED GENERATOR IF TASK COMPLETED
       if (!prevDone && task.done && task.recurring && task.recurring !== "none") {
-        const nextDate = getNextDate(task.date, task.recurring);
-        
-        if (nextDate) {
-          // Check if a future task for this date already exists in this family
-          // We look for tasks with the same rootId and the same target date
-          const familyRootId = task.rootId || task.id;
-          
-          const alreadyExists = tasks.some(t => 
-            !t.deleted && 
-            t.date === nextDate && 
-            t.name === task.name && // Extra safety check on name
-            (t.rootId === familyRootId || t.id === familyRootId) // Must belong to same family
-          );
-
-          if (!alreadyExists) {
-            const newTask = {
-              id: Date.now(),
-              name: task.name,
-              date: nextDate,
-              assignedTo: task.assignedTo || null,
-              recurring: task.recurring,
-              parentId: task.id,
-              rootId: familyRootId,
-              order: tasks.filter(t => !t.deleted).length,
-              done: false,
-              created: getLocalISO(new Date()),
-            };
-            
-            let insertIndex = -1;
-            for (let i = tasks.length - 1; i >= 0; i--) {
-              if ((tasks[i].rootId && tasks[i].rootId === newTask.rootId) || tasks[i].id === newTask.rootId) {
-                insertIndex = i;
-                break;
-              }
-            }
-            if (insertIndex === -1) insertIndex = tasks.findIndex(t => t.id === id);
-
-            if (insertIndex !== -1) tasks.splice(insertIndex + 1, 0, newTask);
-            else tasks.push(newTask);
-            
-            Log.log(`Generated recurring task for ${nextDate}: ${newTask.name}`);
-          } else {
-            Log.log(`Skipped generating recurring task for ${nextDate}: already exists.`);
-          }
-        }
+        const created = generateNextRecurringTask(task);
+        if (created) Log.log(`Generated recurring task via completion: ${task.name}`);
       }
 
       const ok = broadcastTasks(self);
