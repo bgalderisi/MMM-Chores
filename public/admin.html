@@ -105,6 +105,10 @@
                     <input type="date" id="taskDate" class="form-control" />
                   </div>
                   <div class="col-sm-auto">
+                    <label for="taskReminderTime" class="form-label">Reminder Time (Optional)</label>
+                    <input type="time" class="form-control" id="taskReminderTime">
+                  </div>
+                  <div class="col-sm-auto">
                     <select id="taskPerson" class="form-select">
                       <option value="">Unassigned</option>
                     </select>
@@ -182,6 +186,10 @@
               <div class="mb-3">
                 <label for="editTaskDate" class="form-label">Date</label>
                 <input type="date" id="editTaskDate" class="form-control" />
+              </div>
+              <div class="mb-3">
+                <label for="editTaskReminderTime" class="form-label">Reminder Time</label>
+                <input type="time" class="form-control" id="editTaskReminderTime">
               </div>
             </div>
             <div class="modal-footer">

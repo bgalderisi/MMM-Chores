@@ -440,6 +440,33 @@ Module.register("MMM-Chores", {
       const li = document.createElement("li");
       li.className = `${this.config.textMirrorSize}${task.done ? " task-done" : ""}`;
 
+      var row = document.createElement("div");
+      row.className = "chore-row"; // Base class
+
+      // 2. LOGIC: Check for Overdue Reminder
+      if (!chore.done && chore.reminderTime) {
+          // We only care if the task date is Today or in the Past
+          var todayStr = moment().format("YYYY-MM-DD");
+          
+          if (chore.date <= todayStr) {
+              var now = moment();
+              // Parse the reminder time (assuming HH:mm format)
+              var reminder = moment(chore.reminderTime, "HH:mm");
+              
+              // If we are past the reminder time
+              if (now.isAfter(reminder)) {
+                  var diffHours = now.diff(reminder, 'hours', true); // Floating point hours
+                  
+                  if (diffHours >= 3) {
+                      row.className += " overdue-red";
+                  } else {
+                      row.className += " overdue-yellow";
+                  }
+              }
+          }
+      }
+
+
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.checked = task.done;

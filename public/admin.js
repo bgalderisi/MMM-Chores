@@ -852,10 +852,12 @@ function openEditModal(task) {
   const nameInput = document.getElementById('editTaskName');
   const dateInput = document.getElementById('editTaskDate');
   const personSelect = document.getElementById('editTaskPerson');
+  const reminderInput = document.getElementById('editTaskReminderTime');
   
   if (nameInput) nameInput.value = task.name;
   if (dateInput) dateInput.value = task.date || '';
   if (personSelect) personSelect.value = task.assignedTo || '';
+  if (reminderInput) reminderInput.value = task.reminderTime || '';
 
   // 2. Inject Hard Delete Buttons (New Logic)
   const modalFooter = document.querySelector('#editTaskModal .modal-footer');
@@ -1082,6 +1084,8 @@ document.getElementById("taskForm").addEventListener("submit", async e => {
   let date = document.getElementById("taskDate").value;
   const recurring = document.getElementById("taskRecurring").value;
   const assigned = document.getElementById("taskPerson").value;
+  const reminderTime = document.getElementById("taskReminderTime").value;
+
   if (!name) return;
   if (!date) date = new Date().toISOString().split("T")[0];
 
@@ -1104,6 +1108,7 @@ document.getElementById("taskForm").addEventListener("submit", async e => {
       date,
       recurring,
       assignedTo: assigned ? parseInt(assigned) : null,
+      reminderTime: reminderTime || null,
       created: iso,
       createdShort: stamp("C")
     })
@@ -1117,10 +1122,12 @@ document.getElementById('editTaskForm').addEventListener('submit', async e => {
   const name = document.getElementById('editTaskName').value.trim();
   const date = document.getElementById('editTaskDate').value;
   const assigned = document.getElementById('editTaskPerson').value;
+  const reminderTime = document.getElementById('editTaskReminderTime').value;
   await updateTask(editTaskId, {
     name,
     date,
-    assignedTo: assigned ? parseInt(assigned) : null
+    assignedTo: assigned ? parseInt(assigned) : null,
+    reminderTime: reminderTime || null
   });
   if (editTaskModal) editTaskModal.hide();
   editTaskId = null;
