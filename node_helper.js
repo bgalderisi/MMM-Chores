@@ -52,29 +52,18 @@ let midnightScanTimer = null;
 
 function applyLoadedData(json, sourceLabel = "data.json") {
   tasks = json.tasks || [];
+  
+  // Initial sort to establish a baseline if order is missing
   if (tasks.some(t => t.order !== undefined)) {
-    tasks.sort((a, b) => {
-      if (a.deleted && !b.deleted) return 1;
-      if (!a.deleted && b.deleted) return -1;
-      return (a.order || 0) - (b.order || 0);
-    });
+    tasks.sort((a, b) => (a.order || 0) - (b.order || 0));
   }
   
-  // Clean up order on load
-  let order = 0;
-  tasks.forEach(t => {
-    if (t.deleted) {
-      delete t.order;
-    } else {
-      t.order = order++;
-    }
-  });
+  // Re-calculate fresh decimal orders on load
+  applyTaskOrder();
 
   people          = json.people          || [];
   analyticsBoards = json.analyticsBoards || [];
   settings        = json.settings        || {};
-  
-  // Strip sensitive keys if they accidentally got saved
   if (settings.openaiApiKey !== undefined) delete settings.openaiApiKey;
   if (settings.pushoverApiKey !== undefined) delete settings.pushoverApiKey;
   if (settings.pushoverUser !== undefined) delete settings.pushoverUser;
@@ -176,7 +165,7 @@ function scheduleMidnightScan(helper) {
   
   const now = new Date();
   const next = new Date(now);
-  next.setHours(0, 1, 0, 0); // 1 minute past midnight
+  next.setHours(0, 1, 0, 0);
   
   if (next <= now) {
     next.setDate(next.getDate() + 1);
@@ -218,7 +207,6 @@ function scanForMissedRecurrences(helper) {
   }
 }
 
-// SHARED GENERATOR LOGIC
 function generateNextRecurringTask(task) {
   const nextDate = getNextDate(task.date, task.recurring);
   if (!nextDate) return false;
@@ -241,7 +229,8 @@ function generateNextRecurringTask(task) {
     recurring: task.recurring,
     parentId: task.id,
     rootId: familyRootId,
-    order: tasks.filter(t => !t.deleted).length,
+    // Order will be recalculated by applyTaskOrder during broadcast
+    order: 0, 
     done: false,
     created: getLocalISO(new Date()),
   };
@@ -393,62 +382,70 @@ function updatePeopleLevels(config) {
   });
 }
 
-// FIX: New helper to group families together to prevent fragmentation
-function defragmentTasks() {
-  Log.log("Defragmenting tasks (Grouping families)...");
+// FIX: DECIMAL ORDER GENERATION (Rank.YYYYMMDD)
+function applyTaskOrder() {
+  Log.log(`applyTaskOrder: Calculating decimal orders...`);
   
-  // 1. Group by rootId
-  const familyMap = new Map();
-  const rootsOrder = []; // To preserve relative order of families
+  // 1. Identify existing family ranks based on current order
+  // We scan the array to see the order of unique rootIds
+  const rootOrder = [];
+  const rootSeen = new Set();
   
   tasks.forEach(t => {
-    // Determine family root
+    if (t.deleted) return;
     const root = t.rootId || t.id;
-    if (!familyMap.has(root)) {
-      familyMap.set(root, []);
-      rootsOrder.push(root); // Record first time we see this family
+    if (!rootSeen.has(root)) {
+      rootSeen.add(root);
+      rootOrder.push(root);
     }
-    familyMap.get(root).push(t);
-  });
-
-  // 2. Sort internals of each family by Date
-  familyMap.forEach(famTasks => {
-    famTasks.sort((a, b) => {
-      if (a.date < b.date) return -1;
-      if (a.date > b.date) return 1;
-      if (a.created < b.created) return -1;
-      if (a.created > b.created) return 1;
-      return 0;
-    });
-  });
-
-  // 3. Rebuild list
-  const newList = [];
-  rootsOrder.forEach(root => {
-    const famTasks = familyMap.get(root);
-    famTasks.forEach(t => newList.push(t));
   });
   
-  tasks = newList;
-}
-
-function applyTaskOrder() {
-  let idx = 0;
+  // 2. Map rootId -> Integer Rank (0, 1, 2...)
+  const rankMap = new Map();
+  rootOrder.forEach((root, index) => {
+    rankMap.set(root, index);
+  });
+  
+  // 3. Assign Decimal Order: Rank + (DateAsNumber / 100,000,000)
+  // Format YYYYMMDD fits into 8 digits. 
+  // Rank 5, Date 20251214 => 5.20251214
+  
   tasks.forEach(t => {
     if (t.deleted) {
       delete t.order;
-    } else {
-      t.order = idx++;
+      return;
     }
+    
+    const root = t.rootId || t.id;
+    // If a task is not in our seen list (e.g. newly added), put it at the end
+    let rank = rankMap.has(root) ? rankMap.get(root) : rootOrder.length;
+    
+    // Parse date YYYY-MM-DD -> 20251214
+    let dateVal = 0;
+    if (t.date) {
+      const cleanDate = t.date.replace(/-/g, ""); // "2025-12-14" -> "20251214"
+      dateVal = parseInt(cleanDate, 10) || 0;
+    }
+    
+    // Calculate final order: Rank + (Date / 100,000,000)
+    // We divide by 100M because YYYYMMDD is ~20 million.
+    // 20251214 / 100000000 = 0.20251214
+    t.order = rank + (dateVal / 100000000);
   });
 }
 
 function broadcastTasks(helper) {
   Log.log(`broadcastTasks: start ${tasks.length} tasks`);
   
-  // FIX: Force family grouping before saving/sending
-  defragmentTasks();
+  // Recalculate orders using decimal logic
   applyTaskOrder();
+  
+  // Sort by the new decimal order
+  tasks.sort((a, b) => {
+    if (a.deleted && !b.deleted) return 1;
+    if (!a.deleted && b.deleted) return -1;
+    return (a.order || 0) - (b.order || 0);
+  });
 
   const analyticsData = tasks.filter(t => !(t.deleted && !t.done));
 
@@ -458,7 +455,6 @@ function broadcastTasks(helper) {
   helper.sendSocketNotification("LEVEL_INFO", getLevelInfo(helper.config || {}));
   helper.sendSocketNotification("PEOPLE_UPDATE", people);
   const ok = saveData();
-  Log.log(`broadcastTasks: saveData returned ${ok}`);
   return ok;
 }
 
@@ -827,7 +823,7 @@ module.exports = NodeHelper.create({
         id: generatedId,
         ...req.body,
         created: getLocalISO(now),
-        order: tasks.filter(t => !t.deleted).length,
+        // order is calc'd in broadcast
         done: false,
         assignedTo: newAssignee,
         recurring: req.body.recurring || "none",
@@ -836,7 +832,6 @@ module.exports = NodeHelper.create({
       };
       Log.log("POST /api/tasks", newTask);
       
-      // Just push. broadcastTasks() will defragment it to the right place.
       tasks.push(newTask);
       
       sendPushover(self, settings, `New task: ${newTask.name}`);
@@ -844,6 +839,7 @@ module.exports = NodeHelper.create({
       res.status(ok ? 201 : 500).json(ok ? newTask : { error: "Failed to save data" });
     });
 
+    // FIX: REORDER USING DECIMAL RANKS
     app.put("/api/tasks/reorder", requireWrite, (req, res) => {
       const { ids, movedId } = req.body;
       const idList = Array.isArray(ids) ? ids : (Array.isArray(req.body) ? req.body : []);
@@ -851,24 +847,8 @@ module.exports = NodeHelper.create({
       if (!idList.length) return res.status(400).json({ error: "Expected task ids" });
       Log.log("PUT /api/tasks/reorder", idList.length, "tasks. Moved:", movedId);
 
-      const familyMap = new Map();
       const taskLookup = new Map();
-      tasks.forEach(t => {
-        taskLookup.set(t.id, t);
-        const root = t.rootId || t.id;
-        if (!familyMap.has(root)) familyMap.set(root, []);
-        familyMap.get(root).push(t);
-      });
-
-      familyMap.forEach((familyTasks) => {
-        familyTasks.sort((a, b) => {
-          if (a.date < b.date) return -1;
-          if (a.date > b.date) return 1;
-          if (a.created < b.created) return -1;
-          if (a.created > b.created) return 1;
-          return 0;
-        });
-      });
+      tasks.forEach(t => taskLookup.set(t.id, t));
 
       let activeRootId = null;
       if (movedId) {
@@ -878,51 +858,62 @@ module.exports = NodeHelper.create({
         }
       }
 
-      const familyOrder = [];
+      // Determine the NEW order of families (Ranks)
+      const newRootOrder = [];
       const seenRoots = new Set();
 
       idList.forEach(id => {
         const task = taskLookup.get(id);
         if (!task) return;
         const root = task.rootId || task.id;
-        
+
+        // If this is the active moved family, only add it at the dragged position
         if (root === activeRootId) {
           if (id === movedId && !seenRoots.has(root)) {
-            familyOrder.push(root);
+            newRootOrder.push(root);
             seenRoots.add(root);
           }
         } else {
+          // For others, add them first time seen
           if (!seenRoots.has(root)) {
-            familyOrder.push(root);
+            newRootOrder.push(root);
             seenRoots.add(root);
           }
         }
       });
-
+      
+      // Append missing roots
       tasks.forEach(t => {
         const root = t.rootId || t.id;
         if (!seenRoots.has(root)) {
-          familyOrder.push(root);
+          newRootOrder.push(root);
           seenRoots.add(root);
         }
       });
 
-      const newList = [];
-      familyOrder.forEach(root => {
-        const members = familyMap.get(root) || [];
-        members.forEach(m => newList.push(m));
-      });
-
-      tasks = newList;
-      let order = 0;
+      // Assign Integer Ranks temporarily to tasks so applyTaskOrder can use them
+      // Actually, applyTaskOrder scans unique rootIds from the task array order.
+      // So we just need to resort the MAIN tasks array based on this `newRootOrder`.
+      
+      // 1. Group tasks by root
+      const familyMap = new Map();
       tasks.forEach(t => {
-        if (t.deleted) delete t.order;
-        else t.order = order++;
+        const root = t.rootId || t.id;
+        if (!familyMap.has(root)) familyMap.set(root, []);
+        familyMap.get(root).push(t);
       });
-
-      Log.log("New task order applied. Active Family:", activeRootId);
+      
+      // 2. Rebuild tasks array in new Family Rank order
+      const newTasksList = [];
+      newRootOrder.forEach(root => {
+        const famTasks = familyMap.get(root) || [];
+        famTasks.forEach(t => newTasksList.push(t));
+      });
+      
+      tasks = newTasksList;
+      
+      // 3. Now broadcastTasks() calls applyTaskOrder() which calculates the decimals
       const ok = broadcastTasks(self);
-      if (!ok) return res.status(500).json({ error: "Failed to save data" });
       res.json({ success: true });
     });
 
