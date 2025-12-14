@@ -455,29 +455,28 @@ Module.register("MMM-Chores", {
       }
 
       const li = document.createElement("li");
-      li.style.display = "flex";
-      li.style.alignItems = "center";
-      li.style.justifyContent = "space-between"; // Ensures spacing if we use spacers
-
-      // 2. Add the overdueClass to the list item
       li.className = `${this.config.textMirrorSize}${task.done ? " task-done" : ""}${overdueClass}`;
+
+      // --- FLEXBOX LAYOUT SETTINGS ---
+      li.style.display = "flex";
+      li.style.width = "100%";        // Ensures the row spans the full module width
+      li.style.alignItems = "center"; // Vertically centers text, checkbox, and icon
+      // -------------------------------
 
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.checked = task.done;
-      cb.style.marginRight = "8px";
+      cb.style.marginRight = "20px"; // Your custom spacing
+      cb.style.transform = "scale(1.5)"; // Your custom size
       cb.addEventListener("change", () => {
         li.classList.add("moving");
         setTimeout(() => this.toggleDone(task, cb.checked), 200);
       });
       li.appendChild(cb);
 
-      // Check if dates are enabled in config
+      // DATE TOGGLE LOGIC
       const showDate = this.config.showTaskDates !== false; 
-      
       const dateText = showDate ? this.formatDate(task.date) : "";
-      
-      // Only add the space if dateText exists
       const fullText = dateText ? `${task.name} ${dateText}` : task.name;
       
       const text = document.createTextNode(fullText);
@@ -499,18 +498,20 @@ Module.register("MMM-Chores", {
         li.appendChild(assignedEl);
       }
 
+      // --- ICON LOGIC (RIGHT ALIGNED) ---
       if (task.icon) {
         const iconSpan = document.createElement("span");
-        // Use the class provided (e.g., "fa fa-trash")
         iconSpan.className = task.icon;
         
-        // Style to push it to the far right
+        // This pushes the icon to the far right
         iconSpan.style.marginLeft = "auto"; 
-        // Optional: Add a little left padding so it doesn't touch the name
-        iconSpan.style.paddingLeft = "10px"; 
+        
+        // Optional: Ensure it doesn't get too close if text is long
+        iconSpan.style.paddingLeft = "15px"; 
         
         li.appendChild(iconSpan);
       }
+      // ----------------------------------
 
       ul.appendChild(li);
     });
