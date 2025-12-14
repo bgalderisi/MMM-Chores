@@ -980,7 +980,31 @@ module.exports = NodeHelper.create({
       const id = parseInt(req.params.id, 10);
       const task = tasks.find(t => t.id === id);
       if (!task) return res.status(404).json({ error: "Task not found" });
+
+      // FIX: CHAIN HEALING
+      // If we delete a recurring task, we must ensure the NEXT one is generated first
+      // so the schedule doesn't die. (Treat delete as "Skip this instance")
+      if (task.recurring && task.recurring !== "none") {
+        const nextDate = getNextDate(task.date, task.recurring);
+        if (nextDate) {
+           // Check if a successor already exists
+           const familyRootId = task.rootId || task.id;
+           const successorExists = tasks.some(t => 
+             !t.deleted && 
+             t.date >= nextDate && // Any future task
+             (t.rootId === familyRootId || t.id === familyRootId)
+           );
+
+           if (!successorExists) {
+             // No future task found? Generate the next one before dying.
+             Log.log(`Deleting recurring task ${task.id}. Generating next instance to preserve chain.`);
+             generateNextRecurringTask(task);
+           }
+        }
+      }
+
       task.deleted = true;
+      Log.log("DELETE /api/tasks/" + id);
       const ok = broadcastTasks(self);
       res.json({ success: ok });
     });
