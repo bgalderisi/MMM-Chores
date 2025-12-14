@@ -30,6 +30,7 @@ Module.register("MMM-Chores", {
     reminderTime: "",
     login: false,
     users: [],
+    showTaskDates: true,
     showAnalyticsOnMirror: false, // display analytics cards on the mirror
     analyticsCards: [],           // board types selected in the admin UI
     leveling: {
@@ -467,8 +468,15 @@ Module.register("MMM-Chores", {
       });
       li.appendChild(cb);
 
-      const dateText = this.formatDate(task.date);
-      const text = document.createTextNode(`${task.name} ${dateText}`);
+      // Check if dates are enabled in config
+      const showDate = this.config.showTaskDates !== false; 
+      
+      const dateText = showDate ? this.formatDate(task.date) : "";
+      
+      // Only add the space if dateText exists
+      const fullText = dateText ? `${task.name} ${dateText}` : task.name;
+      
+      const text = document.createTextNode(fullText);
       li.appendChild(text);
 
       if (task.assignedTo) {

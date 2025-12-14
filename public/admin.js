@@ -191,6 +191,7 @@ function initSettingsForm(settings) {
   const rewardTitlesContainer = document.getElementById('rewardTitlesContainer');
   const rewardTitleInputs = [];
   const backgroundSelect = document.getElementById('settingsBackground');
+  const showTaskDates = document.getElementById('settingsShowTaskDates');
 
   if (showPast) showPast.checked = !!settings.showPast;
   if (textSize) textSize.value = settings.textMirrorSize || 'small';
@@ -206,6 +207,7 @@ function initSettingsForm(settings) {
   if (yearsInput) yearsInput.value = settings.leveling?.yearsToMaxLevel || 3;
   if (perWeekInput) perWeekInput.value = settings.leveling?.choresPerWeekEstimate || 4;
   if (backgroundSelect) backgroundSelect.value = settings.background || 'forest.png';
+  if (showTaskDates) showTaskDates.checked = settings.showTaskDates !== false; 
   if (rewardTitlesContainer) {
     rewardTitlesContainer.innerHTML = '';
     const titles = Array.isArray(settings.levelTitles) ? settings.levelTitles : [];
@@ -280,7 +282,7 @@ function initSettingsForm(settings) {
   settingsChanged = false;
   settingsSaved = false;
 
-  const inputs = [showPast, textSize, dateFmt, useAI, showAnalytics, levelEnable, autoUpdate, pushoverEnable, reminderTime, levelModeSelect, choresToMaxInput, yearsInput, perWeekInput, backgroundSelect, ...rewardTitleInputs];
+  const inputs = [showPast, textSize, showTaskDates, dateFmt, useAI, showAnalytics, levelEnable, autoUpdate, pushoverEnable, reminderTime, levelModeSelect, choresToMaxInput, yearsInput, perWeekInput, backgroundSelect, ...rewardTitleInputs];
   inputs.forEach(el => {
     if (el) {
       el.addEventListener('input', () => { settingsChanged = true; });
@@ -308,7 +310,8 @@ function initSettingsForm(settings) {
           yearsToMaxLevel: parseFloat(yearsInput.value) || 3,
           choresPerWeekEstimate: parseFloat(perWeekInput.value) || 4,
         },
-        levelTitles: rewardTitleInputs.map(inp => inp.value)
+        levelTitles: rewardTitleInputs.map(inp => inp.value),
+        showTaskDates: showTaskDates.checked
       };
     try {
       const res = await authFetch('/api/settings', {
