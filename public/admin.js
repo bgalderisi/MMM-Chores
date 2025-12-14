@@ -734,6 +734,7 @@ function renderTasks() {
 }
 
 // Helper to create a standard task row
+// Helper to create a standard task row
 function createTaskRow(task, canWrite) {
   const li = document.createElement("li");
   li.className = "list-group-item d-flex align-items-center";
@@ -782,10 +783,8 @@ function createTaskRow(task, canWrite) {
   if (formatted) {
     span.innerHTML += ` <small class="task-date">(${formatted})</small>`;
   }
-  // Only show recurring badge if it's a Singleton (families show it in header)
-  // But this helper doesn't know if it's a singleton.
-  // We can leave it, or handle it via CSS/JS logic. 
-  // For now, let's leave it, redundancy is okay or we can hide it via css in family view.
+  
+  // Recurring badge
   if (task.recurring && task.recurring !== "none") {
     const recurText = LANGUAGES[currentLang].taskRecurring[task.recurring] || task.recurring;
     span.innerHTML += ` <span class="badge bg-info text-dark ms-1">${recurText}</span>`;
@@ -800,15 +799,21 @@ function createTaskRow(task, canWrite) {
   left.appendChild(span);
 
   if (canWrite) {
-    const del = document.createElement("button");
-    del.className = "btn btn-sm btn-outline-danger";
-    del.title = LANGUAGES[currentLang].remove;
-    del.innerHTML = '<i class="bi bi-trash"></i>';
-    del.addEventListener("click", () => deleteTask(task.id));
-
-    const dragBtn = document.createElement("button");
-    dragBtn.className = "btn btn-sm btn-outline-secondary drag-handle";
-    dragBtn.innerHTML = '<i class="bi bi-list"></i>';
+    // --- NEW: END SERIES BUTTON ---
+    // Only show if it's the latest in the chain AND currently recurring
+    if (task.isLatest && task.recurring && task.recurring !== 'none') {
+      const stopBtn = document.createElement("button");
+      stopBtn.className = "btn btn-sm btn-outline-warning";
+      stopBtn.title = LANGUAGES[currentLang].endSeries || "End Series";
+      // Using a stop/ban icon
+      stopBtn.innerHTML = '<i class="bi bi-slash-circle"></i>'; 
+      stopBtn.onclick = (e) => {
+        e.stopPropagation(); // Prevent drag/click conflicts
+        endSeries(task.id, task.name);
+      };
+      actions.appendChild(stopBtn);
+    }
+    // ------------------------------
 
     if (!task.done) {
       const edit = document.createElement("button");
@@ -818,7 +823,17 @@ function createTaskRow(task, canWrite) {
       edit.addEventListener("click", () => openEditModal(task));
       actions.appendChild(edit);
     }
+
+    const del = document.createElement("button");
+    del.className = "btn btn-sm btn-outline-danger";
+    del.title = LANGUAGES[currentLang].remove;
+    del.innerHTML = '<i class="bi bi-trash"></i>';
+    del.addEventListener("click", () => deleteTask(task.id));
     actions.appendChild(del);
+
+    const dragBtn = document.createElement("button");
+    dragBtn.className = "btn btn-sm btn-outline-secondary drag-handle";
+    dragBtn.innerHTML = '<i class="bi bi-list"></i>';
     actions.appendChild(dragBtn);
   }
 
@@ -1090,6 +1105,26 @@ async function deletePerson(id) {
 async function deleteTask(id) {
   await authFetch(`/api/tasks/${id}`, { method: "DELETE" });
   await fetchTasks();
+}
+
+async function endSeries(id, name) {
+  if (!confirm(`${LANGUAGES[currentLang].confirmEndSeries || "Stop this recurring series?"}\n\nTask: ${name}`)) {
+    return;
+  }
+  
+  try {
+    const res = await authFetch(`/api/tasks/${id}/end-series`, {
+      method: 'PUT'
+    });
+    
+    if (res.ok) {
+      await fetchTasks();
+    } else {
+      console.error("Failed to end series");
+    }
+  } catch (e) {
+    console.error("Network error ending series", e);
+  }
 }
 
 

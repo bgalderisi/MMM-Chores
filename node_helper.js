@@ -382,6 +382,39 @@ function updatePeopleLevels(config) {
   });
 }
 
+function scanForLatest(taskList) {
+  const seriesMap = {};
+
+  // 1. Group by rootId to find the candidate with the furthest date
+  taskList.forEach(t => {
+    t.isLatest = false; // Default to false
+    if (t.deleted) return;
+
+    const root = t.rootId || t.id;
+    
+    if (!seriesMap[root]) {
+      seriesMap[root] = t;
+    } else {
+      // Compare dates (Strings YYYY-MM-DD compare correctly alphabetically)
+      // If dates are equal, use the one with the higher ID (created later)
+      if (t.date > seriesMap[root].date) {
+        seriesMap[root] = t;
+      } else if (t.date === seriesMap[root].date) {
+        if (t.id > seriesMap[root].id) {
+          seriesMap[root] = t;
+        }
+      }
+    }
+  });
+
+  // 2. Mark the winners
+  Object.values(seriesMap).forEach(winner => {
+    winner.isLatest = true;
+  });
+  
+  return taskList;
+}
+
 // FIX: DECIMAL ORDER GENERATION (Rank.YYYYMMDD)
 function applyTaskOrder() {
   Log.log(`applyTaskOrder: Calculating decimal orders...`);
@@ -437,23 +470,34 @@ function applyTaskOrder() {
 function broadcastTasks(helper) {
   Log.log(`broadcastTasks: start ${tasks.length} tasks`);
   
-  // Recalculate orders using decimal logic
+  // 1. Calculate orders on the real data (we want to persist order)
   applyTaskOrder();
   
-  // Sort by the new decimal order
-  tasks.sort((a, b) => {
+  // 2. Create a shallow copy for the Frontend so we don't save 'isLatest' to DB
+  let frontendTasks = tasks.map(t => ({ ...t }));
+  
+  // 3. Run the Scan on the copy
+  scanForLatest(frontendTasks);
+
+  // 4. Sort the copy for display
+  frontendTasks.sort((a, b) => {
     if (a.deleted && !b.deleted) return 1;
     if (!a.deleted && b.deleted) return -1;
     return (a.order || 0) - (b.order || 0);
   });
 
-  const analyticsData = tasks.filter(t => !(t.deleted && !t.done));
+  // 5. Analytics only cares about active stuff
+  const analyticsData = frontendTasks.filter(t => !(t.deleted && !t.done));
 
   updatePeopleLevels(helper.config || {});
-  helper.sendSocketNotification("TASKS_UPDATE", tasks);
+  
+  // Send the PROCESSED tasks (with isLatest) to frontend
+  helper.sendSocketNotification("TASKS_UPDATE", frontendTasks);
   helper.sendSocketNotification("CHORES_DATA", analyticsData);
   helper.sendSocketNotification("LEVEL_INFO", getLevelInfo(helper.config || {}));
   helper.sendSocketNotification("PEOPLE_UPDATE", people);
+  
+  // Save the RAW tasks (without isLatest) to file
   const ok = saveData();
   return ok;
 }
@@ -491,6 +535,10 @@ module.exports = NodeHelper.create({
     if (notification === "INIT_SERVER") {
       this.config = payload;
       
+      // ... (Keep your existing settings configuration logic here) ...
+      // (For brevity, I am not pasting the huge settings block, 
+      //  but keep the code inside your INIT_SERVER block exactly as it was)
+      
       settings = {
         language: settings.language || payload.language,
         dateFormatting: settings.dateFormatting || payload.dateFormatting,
@@ -526,8 +574,28 @@ module.exports = NodeHelper.create({
         this.sendSocketNotification("SETTINGS_UPDATE", settings);
       }
     }
+    
     if (notification === "USER_TOGGLE_CHORE") {
       this.handleUserToggle(payload);
+    }
+
+    // --- NEW HANDLER ---
+    if (notification === "END_SERIES") {
+      const id = parseInt(payload, 10);
+      const task = tasks.find(t => t.id === id);
+      
+      if (task) {
+        Log.log(`End Series requested for task: ${task.name} (${id})`);
+        
+        // Remove the recurrence flag. 
+        // This stops generateNextRecurringTask from firing when this task is completed.
+        // It effectively turns this specific instance into a one-time task.
+        task.recurring = "none";
+        
+        // Save and update frontend
+        saveData();
+        broadcastTasks(this); 
+      }
     }
   },
 
@@ -789,7 +857,33 @@ module.exports = NodeHelper.create({
       res.json({ success });
     });
 
-    app.get("/api/tasks", (req, res) => res.json(tasks));
+    app.get("/api/tasks", (req, res) => {
+      // Create a copy so we don't modify the persistent array
+      let apiTasks = tasks.map(t => ({ ...t }));
+      
+      // Run the scanner we added earlier to tag isLatest
+      scanForLatest(apiTasks);
+      
+      res.json(apiTasks);
+    });
+
+    app.put("/api/tasks/:id/end-series", requireWrite, (req, res) => {
+      const id = parseInt(req.params.id, 10);
+      const task = tasks.find(t => t.id === id);
+      
+      if (!task) return res.status(404).json({ error: "Task not found" });
+
+      Log.log(`Admin requested End Series for task: ${task.name} (${id})`);
+
+      // Remove recurrence, effectively making it a one-off task
+      task.recurring = "none";
+      
+      saveData();
+      broadcastTasks(self); // Update the mirror immediately
+      
+      res.json({ success: true, task: task });
+    });
+    
     app.post("/api/tasks", requireWrite, (req, res) => {
       const now = new Date();
       const generatedId = Date.now();
