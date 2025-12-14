@@ -13,7 +13,7 @@ const BOARD_TITLES = {
   slacker9000: "Slacker Detector 9000"
 };
 
-Module.register("MMM-Chores2", {
+Module.register("MMM-Chores", {
   defaults: {
     updateInterval: 60 * 1000,
     adminPort: 5003,
