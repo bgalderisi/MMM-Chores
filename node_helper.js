@@ -558,8 +558,7 @@ module.exports = NodeHelper.create({
           choresPerWeekEstimate: (settings.leveling && settings.leveling.choresPerWeekEstimate) || (payload.leveling && payload.leveling.choresPerWeekEstimate)
         },
         levelTitles: settings.levelTitles || payload.levelTitles,
-        customLevelTitles: settings.customLevelTitles || payload.customLevelTitles,
-        includeTaskDate: settings.includeTaskDate || payload.includeTaskDate
+        customLevelTitles: settings.customLevelTitles || payload.customLevelTitles
       };
 
       Object.assign(this.config, settings, {
