@@ -577,7 +577,7 @@ module.exports = NodeHelper.create({
 
   initServer(port) {
     if (this.server) return;
-    Log.log(`initServer: port: ${port}`);
+    Log.log(`MMM-Chores - initServer - port: ${port}`);
     const self = this;
     const app  = express();
 
