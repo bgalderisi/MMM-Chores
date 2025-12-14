@@ -467,9 +467,10 @@ Module.register("MMM-Chores", {
       });
       li.appendChild(cb);
 
+      const dateText = "";
       if (includeTaskDate) {
-        const dateText = this.formatDate(task.date);
-      }
+        dateText = this.formatDate(task.date);
+      } 
       const text = document.createTextNode(`${task.name} ${dateText}`);
       li.appendChild(text);
 

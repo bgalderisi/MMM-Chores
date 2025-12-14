@@ -1,7 +1,7 @@
 {
   "name": "mmm-chores",
   "version": "1.0.0",
-  "description": "A MagicMirror² module to manage Chores and cleaning tasks.",
+  "description": "A MagicMirror² module to manage Chores and cleaning tasks. ",
   "keywords": [
     "MagicMirror",
     "chores",
@@ -10,7 +10,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/PierreGode/MMM-Chores"
+    "url": "https://github.com/bgalderisi/MMM-Chores"
   },
   "main": "MMM-Chores.js",
   "scripts": {
