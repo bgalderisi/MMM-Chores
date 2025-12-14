@@ -21,7 +21,7 @@ Module.register("MMM-Chores", {
     showDays: 1,
     showPast: false,
     dateFormatting: "yyyy-mm-dd", // Standardformat, kan ändras i config
-    textMirrorSize: "small",     // small, medium or large
+    textMirrorSize: "small",     // small, medium, large, or xlarge
     useAI: true,                  // hide AI features when false
     openaiApiKey: "",
     pushoverApiKey: "",

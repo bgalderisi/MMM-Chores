@@ -41,6 +41,28 @@
   margin-right: 25px;
   transform: scale(1.2);
 }
+
+.MMM-Chores li.medium input[type="checkbox"] {
+        transform: scale(1.4);
+        margin-top: 6px;
+        margin-bottom: 6px;
+        margin-right: 18px;
+}
+.MMM-Chores li.large input[type="checkbox"] {
+        transform: scale(1.8);
+        margin-top: 10px;
+        margin-bottom: 10px;
+        margin-right: 22px;
+}
+.MMM-Chores li.xlarge input[type="checkbox"] {
+        transform: scale(2.2);
+        margin-top: 12px;
+        margin-bottom: 12px;
+        margin-right: 22px;
+}
+
+
+
 /* Task color based on due-time */
 .MMM-Chores li.overdue-red {
   color: red;
