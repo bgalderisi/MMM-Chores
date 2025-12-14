@@ -847,12 +847,54 @@ function createTaskRow(task, canWrite) {
 
 function openEditModal(task) {
   editTaskId = task.id;
+
+  // 1. Populate the form fields (Existing logic)
   const nameInput = document.getElementById('editTaskName');
   const dateInput = document.getElementById('editTaskDate');
   const personSelect = document.getElementById('editTaskPerson');
+  
   if (nameInput) nameInput.value = task.name;
   if (dateInput) dateInput.value = task.date || '';
   if (personSelect) personSelect.value = task.assignedTo || '';
+
+  // 2. Inject Hard Delete Buttons (New Logic)
+  const modalFooter = document.querySelector('#editTaskModal .modal-footer');
+  
+  if (modalFooter) {
+    // Remove any existing danger zone to prevent duplicates when reopening modal
+    const existingDanger = modalFooter.querySelector('.danger-zone');
+    if (existingDanger) existingDanger.remove();
+
+    // Create container
+    const dangerDiv = document.createElement('div');
+    dangerDiv.className = "danger-zone w-100 mt-3 pt-3 border-top d-flex justify-content-between align-items-center";
+    
+    // Button: Hard Delete Single
+    const btnSingle = document.createElement('button');
+    btnSingle.type = 'button';
+    btnSingle.className = 'btn btn-danger btn-sm';
+    btnSingle.innerText = 'Hard Delete (This Task)';
+    btnSingle.onclick = () => hardDelete(task.id, 'single');
+    dangerDiv.appendChild(btnSingle);
+
+    // Button: Hard Delete Series (Conditional)
+    // Check if other tasks share this root ID
+    const rootId = task.rootId || task.id;
+    const isSeries = tasksCache.some(t => t.id !== task.id && (t.rootId === rootId || t.id === rootId));
+
+    if (isSeries) {
+      const btnSeries = document.createElement('button');
+      btnSeries.type = 'button';
+      btnSeries.className = 'btn btn-outline-danger btn-sm';
+      btnSeries.innerText = 'Hard Delete SERIES';
+      btnSeries.onclick = () => hardDelete(task.id, 'series');
+      dangerDiv.appendChild(btnSeries);
+    }
+
+    modalFooter.appendChild(dangerDiv);
+  }
+
+  // 3. Show the Modal (Existing logic)
   if (!editTaskModal) {
     const modalEl = document.getElementById('editTaskModal');
     if (modalEl) editTaskModal = new bootstrap.Modal(modalEl);
@@ -1124,6 +1166,32 @@ async function endSeries(id, name) {
     }
   } catch (e) {
     console.error("Network error ending series", e);
+  }
+}
+
+async function hardDelete(taskId, mode) {
+  // mode must be 'single' or 'series'
+  
+  const confirmation = confirm("THIS PERMANENTLY DELETES THE TASK OR TASK FAMILY AND CANNOT BE UNDONE.\n\nAre you sure you want to proceed?");
+  
+  if (!confirmation) return;
+
+  try {
+    const res = await authFetch(`/api/tasks/${taskId}/hard?mode=${mode}`, {
+      method: 'DELETE'
+    });
+
+    if (res.ok) {
+      // If we are in the edit modal, close it
+      if (editTaskModal) editTaskModal.hide();
+      await fetchTasks();
+    } else {
+      const err = await res.json();
+      alert("Error: " + (err.error || "Delete failed"));
+    }
+  } catch (e) {
+    console.error("Hard delete error:", e);
+    alert("Network error.");
   }
 }
 
