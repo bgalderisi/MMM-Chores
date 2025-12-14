@@ -399,7 +399,7 @@ Module.register("MMM-Chores", {
     });
   },
 
-getDom() {
+  getDom() {
     const wrapper = document.createElement("div");
 
     if (this.titleChangeMessage) {
