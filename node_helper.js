@@ -775,32 +775,52 @@ module.exports = NodeHelper.create({
       });
       Log.log("PUT /api/tasks/" + id, req.body);
 
+      // FIX: RECURRING TASK LOGIC WITH DUPLICATE PREVENTION
       if (!prevDone && task.done && task.recurring && task.recurring !== "none") {
         const nextDate = getNextDate(task.date, task.recurring);
+        
         if (nextDate) {
-          const newTask = {
-            id: Date.now(),
-            name: task.name,
-            date: nextDate,
-            assignedTo: task.assignedTo || null,
-            recurring: task.recurring,
-            parentId: task.id,
-            rootId: task.rootId || task.id,
-            order: tasks.filter(t => !t.deleted).length,
-            done: false,
-            created: getLocalISO(new Date()),
-          };
-          let insertIndex = -1;
-          for (let i = tasks.length - 1; i >= 0; i--) {
-            if ((tasks[i].rootId && tasks[i].rootId === newTask.rootId) || tasks[i].id === newTask.rootId) {
-              insertIndex = i;
-              break;
-            }
-          }
-          if (insertIndex === -1) insertIndex = tasks.findIndex(t => t.id === id);
+          // Check if a future task for this date already exists in this family
+          // We look for tasks with the same rootId and the same target date
+          const familyRootId = task.rootId || task.id;
+          
+          const alreadyExists = tasks.some(t => 
+            !t.deleted && 
+            t.date === nextDate && 
+            t.name === task.name && // Extra safety check on name
+            (t.rootId === familyRootId || t.id === familyRootId) // Must belong to same family
+          );
 
-          if (insertIndex !== -1) tasks.splice(insertIndex + 1, 0, newTask);
-          else tasks.push(newTask);
+          if (!alreadyExists) {
+            const newTask = {
+              id: Date.now(),
+              name: task.name,
+              date: nextDate,
+              assignedTo: task.assignedTo || null,
+              recurring: task.recurring,
+              parentId: task.id,
+              rootId: familyRootId,
+              order: tasks.filter(t => !t.deleted).length,
+              done: false,
+              created: getLocalISO(new Date()),
+            };
+            
+            let insertIndex = -1;
+            for (let i = tasks.length - 1; i >= 0; i--) {
+              if ((tasks[i].rootId && tasks[i].rootId === newTask.rootId) || tasks[i].id === newTask.rootId) {
+                insertIndex = i;
+                break;
+              }
+            }
+            if (insertIndex === -1) insertIndex = tasks.findIndex(t => t.id === id);
+
+            if (insertIndex !== -1) tasks.splice(insertIndex + 1, 0, newTask);
+            else tasks.push(newTask);
+            
+            Log.log(`Generated recurring task for ${nextDate}: ${newTask.name}`);
+          } else {
+            Log.log(`Skipped generating recurring task for ${nextDate}: already exists.`);
+          }
         }
       }
 
