@@ -230,6 +230,7 @@ function generateNextRecurringTask(task) {
     parentId: task.id,
     rootId: familyRootId,
     icon: task.icon,
+    reminderTime: task.reminderTime,
     // Order will be recalculated by applyTaskOrder during broadcast
     order: 0, 
     done: false,
