@@ -1306,7 +1306,7 @@ function renderChart(canvasId, type) {
       const labels = [];
       const counts = [];
       const undoneCounts = [];
-      for (let i = 10; i >= 0; i--) {
+      for (let i = 3; i >= 0; i--) {
         const d = new Date(today);
         d.setDate(today.getDate() - i);
         labels.push(d.toISOString().split("T")[0]);
@@ -1335,6 +1335,12 @@ function renderChart(canvasId, type) {
             backgroundColor: "rgba(255,99,132,0.5)"
           }
         ]
+      };
+      options = {
+        scales: {
+          x: { stacked: true },
+          y: { stacked: true, beginAtZero: true }
+        }
       };
       break;
     }
