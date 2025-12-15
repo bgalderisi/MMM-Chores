@@ -1300,6 +1300,45 @@ function renderChart(canvasId, type) {
   const filteredTasks = (filterFn) => tasksCache.filter(t => !(t.deleted && !t.done) && filterFn(t));
 
   switch (type) {
+
+    case "daily": {
+      const today = new Date();
+      const labels = [];
+      const counts = [];
+      const undoneCounts = [];
+      for (let i = 10; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(today.getDate() - i);
+        labels.push(d.toISOString().split("T")[0]);
+        const c = filteredTasks(t => {
+          const td = new Date(t.date);
+          return t.done && ((today - td) / 86400000) >= i && ((today - td) / 86400000) < (i + 1);
+        }).length;
+        counts.push(c);
+        const u = filteredTasks(t => {
+          const td = new Date(t.date);
+          return !t.done && ((today - td) / 86400000) >= i && ((today - td) / 86400000) < (i + 1);
+        }).length;
+        undoneCounts.push(u);
+      }
+      data = {
+        labels,
+        datasets: [
+          {
+            label: LANGUAGES[currentLang].chartLabels.completedTasks,
+            data: counts,
+            backgroundColor: "rgba(75,192,192,0.5)"
+          },
+          {
+            label: LANGUAGES[currentLang].chartLabels.unfinishedTasks,
+            data: undoneCounts,
+            backgroundColor: "rgba(255,99,132,0.5)"
+          }
+        ]
+      };
+      break;
+    }
+    
     case "weekly": {
       const today = new Date();
       const labels = [];
