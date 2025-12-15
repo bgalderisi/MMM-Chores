@@ -229,6 +229,7 @@ function generateNextRecurringTask(task) {
     recurring: task.recurring,
     parentId: task.id,
     rootId: familyRootId,
+    icon: task.icon,
     // Order will be recalculated by applyTaskOrder during broadcast
     order: 0, 
     done: false,
