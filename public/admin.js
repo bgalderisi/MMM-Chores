@@ -1093,7 +1093,11 @@ document.getElementById("taskForm").addEventListener("submit", async e => {
   const icon = document.getElementById("taskIcon").value.trim();
 
   if (!name) return;
-  if (!date) date = new Date().toISOString().split("T")[0];
+  if (!date) {
+    const now = new Date();
+    const local = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
+    date = local.toISOString().split("T")[0];
+  }
 
   const now = new Date();
   const iso = now.toISOString();
